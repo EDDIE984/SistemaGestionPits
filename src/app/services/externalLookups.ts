@@ -62,36 +62,29 @@ function pickString(record: LookupRecord, keys: string[]) {
   return undefined;
 }
 
-async function readJsonResponse(response: Response) {
+async function invokeExternalLookup(type: 'cedula' | 'placa', value: string) {
+  const response = await fetch('/api/external-lookup', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ type, value }),
+  });
   const text = await response.text();
-  if (!text) return null;
+  const payload = text ? JSON.parse(text) : null;
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
+  if (!response.ok || (payload && typeof payload === 'object' && 'error' in payload)) {
+    const message = payload && typeof payload === 'object' && 'error' in payload
+      ? String((payload as { error: unknown }).error)
+      : `No se pudo consultar ${type}.`;
+    throw new Error(message);
   }
+
+  return payload;
 }
 
 export async function lookupCedula(cedula: string): Promise<CedulaLookupResult> {
-  const baseUrl = import.meta.env.VITE_API_CEDULA_URL as string | undefined;
-  const apiKey = import.meta.env.VITE_API_CEDULA_KEY as string | undefined;
-
-  if (!baseUrl || !apiKey) {
-    throw new Error('Faltan VITE_API_CEDULA_URL o VITE_API_CEDULA_KEY en .env');
-  }
-
-  const url = new URL(baseUrl);
-  url.searchParams.set('Cedula', cedula);
-  url.searchParams.set('Apikey', apiKey);
-
-  const response = await fetch(url.toString());
-  const payload = await readJsonResponse(response);
-
-  if (!response.ok) {
-    throw new Error(`Consulta de cedula fallida (${response.status})`);
-  }
-
+  const payload = await invokeExternalLookup('cedula', cedula);
   const record = firstRecord(payload);
 
   return {
@@ -113,25 +106,7 @@ export async function lookupCedula(cedula: string): Promise<CedulaLookupResult> 
 }
 
 export async function lookupPlaca(placa: string): Promise<PlacaLookupResult> {
-  const baseUrl = import.meta.env.VITE_API_PLACA_URL as string | undefined;
-  const token = import.meta.env.VITE_API_PLACA_TOKEN as string | undefined;
-
-  if (!baseUrl || !token) {
-    throw new Error('Faltan VITE_API_PLACA_URL o VITE_API_PLACA_TOKEN en .env');
-  }
-
-  const url = `${baseUrl.replace(/\/$/, '')}/${encodeURIComponent(placa)}`;
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  const payload = await readJsonResponse(response);
-
-  if (!response.ok) {
-    throw new Error(`Consulta de placa fallida (${response.status})`);
-  }
-
+  const payload = await invokeExternalLookup('placa', placa);
   const record = firstRecord(payload);
 
   return {

@@ -60,29 +60,7 @@ export function Login() {
           <h2 className="mt-4 text-4xl font-medium leading-tight text-gray-900">
             Ordenes, islas y tiempos reales en una sola pantalla de trabajo.
           </h2>
-          <p className="mt-4 text-base leading-7 text-gray-500">
-            Sistema conectado a Supabase para controlar estados y proyectar el avance del taller.
-          </p>
-        </div>
-
-        <div>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { value: '4', label: 'islas base' },
-              { value: '10', label: 'estados' },
-              { value: 'Flat', label: 'rate listo' },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-lg border border-[#4DBFB8]/20 bg-[#E8F7F6] p-4"
-              >
-                <p className="text-2xl font-semibold text-[#4DBFB8]">{stat.value}</p>
-                <p className="text-sm text-gray-500">{stat.label}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-6 text-xs text-gray-400">© OneWayEc</p>
-        </div>
+        <p className="mt-6 text-xs text-gray-400">© OneWayEc</p>
       </section>
 
       {/* Panel derecho — formulario */}

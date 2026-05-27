@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { fetchOrderProcess, saveOrderStep, emptyProcess as emptyProcessFromService } from '@/app/services/orderProcessService';
-import { fetchOrders, createOrder, updateOrderStatus } from '@/app/services/ordersService';
+import { fetchOrders, createOrder, updateOrderStatus, deleteOrder } from '@/app/services/ordersService';
 import { executeIslandTask, modifyIslandTask } from '@/app/services/orderProcessService';
 import { supabase } from '@/app/lib/supabase';
 import type { OrderProcess, OrderStatus, WorkshopOrder } from '@/app/types';
@@ -44,7 +44,7 @@ export function useMockOrders(): WorkshopOrder[] {
       return () => ordersListeners.delete(listener);
     },
     getOrdersSnapshot,
-    () => []
+    () => EMPTY_ORDERS
   );
 }
 
@@ -90,18 +90,26 @@ export async function updateMockOrderStatus(
   delete processCache[id];
 }
 
+export async function deleteMockOrder(id: string): Promise<void> {
+  await deleteOrder(id);
+  ordersCache = null;
+  ordersLoading = false;
+  delete processCache[id];
+  processesCache = null;
+  processesLoading = false;
+  getOrdersSnapshot();
+  getProcessesSnapshot();
+}
+
 // ── Process store ─────────────────────────────────────────────────
 
 const processCache: Record<string, OrderProcess> = {};
 const processLoading = new Set<string>();
 const processListeners = new Set<() => void>();
+const EMPTY_PROCESS: OrderProcess = emptyProcessFromService();
 
 function emitProcessChange() {
   processListeners.forEach((fn) => fn());
-}
-
-function emptyProcess(): OrderProcess {
-  return emptyProcessFromService();
 }
 
 function getProcessSnapshot(orderId: string): OrderProcess {
@@ -115,11 +123,11 @@ function getProcessSnapshot(orderId: string): OrderProcess {
       })
       .catch(() => {
         processLoading.delete(orderId);
-        processCache[orderId] = emptyProcess();
+        processCache[orderId] = EMPTY_PROCESS;
         emitProcessChange();
       });
   }
-  return processCache[orderId] ?? emptyProcess();
+  return processCache[orderId] ?? EMPTY_PROCESS;
 }
 
 export function getMockOrderProcess(orderId: string): OrderProcess {
@@ -150,7 +158,10 @@ export async function saveMockOrderProcess(
     // Refresh from DB to pick up assigned IDs
     processLoading.delete(orderId);
     delete processCache[orderId];
+    processesCache = null;
+    processesLoading = false;
     getProcessSnapshot(orderId);
+    getProcessesSnapshot();
   }
 }
 

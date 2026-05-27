@@ -11,6 +11,7 @@ import { IslandBoardPage } from '@/app/pages/IslandBoardPage';
 import { Login } from '@/app/pages/Login';
 import { ModificationsPage } from '@/app/pages/ModificationsPage';
 import { NewOrderPage } from '@/app/pages/NewOrderPage';
+import { NotificationsPage } from '@/app/pages/NotificationsPage';
 import { OrderDetailPage } from '@/app/pages/OrderDetailPage';
 import { OrdersPage } from '@/app/pages/OrdersPage';
 import { PlaceholderPage } from '@/app/pages/PlaceholderPage';
@@ -44,7 +45,7 @@ export default function App() {
               <Route path="reportes/:tipo" element={<ReportsPage />} />
               <Route path="configuracion" element={<ConfigurationPage />} />
               <Route path="configuracion/:catalogo" element={<CatalogMaintenancePage />} />
-              <Route path="notificaciones" element={<PlaceholderPage title="Notificaciones" description="Alertas internas por atrasos, repuestos vencidos, calidad rechazada y ordenes listas para entrega." />} />
+              <Route path="notificaciones" element={<NotificationsPage />} />
             </Route>
           </Route>
         </Routes>

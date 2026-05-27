@@ -47,6 +47,7 @@ export interface WorkshopOrder {
   id: string;
   numero_orden: string;
   estado: OrderStatus;
+  sucursal_id: string;
   sucursal: string;
   placa: string;
   marca: string;

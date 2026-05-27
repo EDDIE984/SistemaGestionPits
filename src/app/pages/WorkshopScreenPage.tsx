@@ -1,8 +1,10 @@
 import { Monitor, RefreshCcw } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
+import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
+import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime } from '@/app/lib/format';
 import { useMockOrderProcesses, useMockOrders } from '@/app/store/mockOrders';
 
@@ -11,8 +13,9 @@ const islands = ['Enderezada', 'Pintura', 'Mecanica', 'Calidad'];
 export function WorkshopScreenPage() {
   const orders = useMockOrders();
   const processes = useMockOrderProcesses();
+  const sucursalScope = useSucursalScope();
   const tasks = orders
-    .filter((order) => order.estado === 'INICIO_REPARACION')
+    .filter((order) => order.estado === 'INICIO_REPARACION' && matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId))
     .flatMap((order) => {
       const process = processes[order.id];
       return (process?.tareas ?? []).map((task, index) => ({
@@ -22,6 +25,7 @@ export function WorkshopScreenPage() {
         numero_orden: order.numero_orden,
         placa: order.placa,
         vehiculo: `${order.marca} ${order.modelo}`,
+        sucursal_id: order.sucursal_id,
       }));
     });
 
@@ -33,6 +37,18 @@ export function WorkshopScreenPage() {
         description="Vista proyectable para visualizar el vehiculo actual, el proximo trabajo y el estado operativo por isla."
         action={<Button variant="outline"><RefreshCcw className="h-4 w-4" />Actualizar</Button>}
       />
+
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <SucursalScopeControl
+            isAdmin={sucursalScope.isAdmin}
+            sucursales={sucursalScope.sucursales}
+            selectedSucursalId={sucursalScope.selectedSucursalId}
+            selectedSucursalName={sucursalScope.selectedSucursalName}
+            onSucursalChange={sucursalScope.setSelectedSucursalId}
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-4">
         {islands.map((isla) => {

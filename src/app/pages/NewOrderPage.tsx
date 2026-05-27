@@ -4,6 +4,7 @@ import { AlertCircle, Car, Loader2, Search } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/app/auth/AuthContext';
 import { PageHeader } from '@/app/components/PageHeader';
+import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { Alert, AlertDescription, AlertTitle } from '@/app/components/ui/alert';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -11,9 +12,10 @@ import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Textarea } from '@/app/components/ui/textarea';
+import { ALL_SUCURSALES, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { lookupCedula, lookupPlaca } from '@/app/services/externalLookups';
-import { fetchSucursales, fetchAseguradoras } from '@/app/services/configService';
-import type { SucursalOption, AseguradoraOption } from '@/app/services/configService';
+import { fetchAseguradoras } from '@/app/services/configService';
+import type { AseguradoraOption } from '@/app/services/configService';
 import { addMockOrder } from '@/app/store/mockOrders';
 
 interface OrderFormState {
@@ -36,6 +38,7 @@ interface OrderFormState {
 export function NewOrderPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const sucursalScope = useSucursalScope();
   const [form, setForm] = useState<OrderFormState>({
     sucursal_id: user?.sucursal_id ?? '',
     aseguradora_id: '',
@@ -52,7 +55,6 @@ export function NewOrderPage() {
     motor: '',
     observaciones: '',
   });
-  const [sucursales, setSucursales] = useState<SucursalOption[]>([]);
   const [aseguradoras, setAseguradoras] = useState<AseguradoraOption[]>([]);
   const [isLookingUpCedula, setIsLookingUpCedula] = useState(false);
   const [isLookingUpPlaca, setIsLookingUpPlaca] = useState(false);
@@ -61,19 +63,23 @@ export function NewOrderPage() {
   const [lookupInfo, setLookupInfo] = useState('');
 
   useEffect(() => {
-    fetchSucursales().then(setSucursales).catch(() => undefined);
     fetchAseguradoras().then(setAseguradoras).catch(() => undefined);
   }, []);
 
-  // Set default sucursal from user session once sucursales load
   useEffect(() => {
-    if (sucursales.length > 0 && !form.sucursal_id) {
+    if (!sucursalScope.isAdmin && user?.sucursal_id) {
+      setForm((current) => ({ ...current, sucursal_id: user.sucursal_id }));
+    }
+  }, [sucursalScope.isAdmin, user?.sucursal_id]);
+
+  useEffect(() => {
+    if (sucursalScope.isAdmin) {
       setForm((current) => ({
         ...current,
-        sucursal_id: user?.sucursal_id ?? sucursales[0].id,
+        sucursal_id: sucursalScope.selectedSucursalId === ALL_SUCURSALES ? '' : sucursalScope.selectedSucursalId,
       }));
     }
-  }, [sucursales, user?.sucursal_id]);
+  }, [sucursalScope.isAdmin, sucursalScope.selectedSucursalId]);
 
   const updateField = (field: keyof OrderFormState, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -195,14 +201,16 @@ export function NewOrderPage() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Sucursal de ingreso</Label>
-                  <Select value={form.sucursal_id} onValueChange={(v) => updateField('sucursal_id', v)}>
-                    <SelectTrigger><SelectValue placeholder="Selecciona sucursal" /></SelectTrigger>
-                    <SelectContent>
-                      {sucursales.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SucursalScopeControl
+                    isAdmin={sucursalScope.isAdmin}
+                    sucursales={sucursalScope.sucursales}
+                    selectedSucursalId={sucursalScope.selectedSucursalId}
+                    selectedSucursalName={sucursalScope.selectedSucursalName}
+                    onSucursalChange={(sucursalId) => {
+                      sucursalScope.setSelectedSucursalId(sucursalId);
+                      updateField('sucursal_id', sucursalId === ALL_SUCURSALES ? '' : sucursalId);
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Aseguradora</Label>
@@ -336,7 +344,7 @@ export function NewOrderPage() {
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-gray-600">
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-800">
-              La orden se creara en estado INGRESADA y luego avanzara a levantamiento de proforma.
+              La orden se creara directamente en levantamiento de proforma. El ingreso queda cumplido al registrar la fecha de entrada.
             </div>
             <p>Las consultas externas se realizan via servicios de cedula y placa. Asegurate de tener conexion.</p>
           </CardContent>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ArrowLeft, CalendarClock, Car, ClipboardCheck, ClipboardList, Factory, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Car, ClipboardCheck, ClipboardList, Factory, Trash2, UserRound } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { Button } from '@/app/components/ui/button';
@@ -15,6 +15,7 @@ import { Textarea } from '@/app/components/ui/textarea';
 import { orderFlow } from '@/app/data/mockData';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
 import {
+  deleteMockOrder,
   saveMockOrderProcess,
   updateMockOrderStatus,
   useMockOrderProcess,
@@ -95,6 +96,18 @@ const damageCategoryOptions = [
   { value: 'K5', label: 'K5 - Puede que la parte requiera reemplazo' },
 ];
 
+const flowStepStyles = [
+  { idle: 'border-sky-100 bg-sky-50/55', done: 'border-sky-200 bg-sky-50', current: 'border-sky-500 bg-sky-50 ring-1 ring-sky-200', accent: 'bg-sky-500' },
+  { idle: 'border-violet-100 bg-violet-50/55', done: 'border-violet-200 bg-violet-50', current: 'border-violet-500 bg-violet-50 ring-1 ring-violet-200', accent: 'bg-violet-500' },
+  { idle: 'border-amber-100 bg-amber-50/60', done: 'border-amber-200 bg-amber-50', current: 'border-amber-500 bg-amber-50 ring-1 ring-amber-200', accent: 'bg-amber-500' },
+  { idle: 'border-orange-100 bg-orange-50/55', done: 'border-orange-200 bg-orange-50', current: 'border-orange-500 bg-orange-50 ring-1 ring-orange-200', accent: 'bg-orange-500' },
+  { idle: 'border-cyan-100 bg-cyan-50/55', done: 'border-cyan-200 bg-cyan-50', current: 'border-cyan-500 bg-cyan-50 ring-1 ring-cyan-200', accent: 'bg-cyan-500' },
+  { idle: 'border-blue-100 bg-blue-50/55', done: 'border-blue-200 bg-blue-50', current: 'border-blue-500 bg-blue-50 ring-1 ring-blue-200', accent: 'bg-blue-500' },
+  { idle: 'border-teal-100 bg-teal-50/55', done: 'border-teal-200 bg-teal-50', current: 'border-teal-500 bg-teal-50 ring-1 ring-teal-200', accent: 'bg-teal-500' },
+  { idle: 'border-emerald-100 bg-emerald-50/55', done: 'border-emerald-200 bg-emerald-50', current: 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-200', accent: 'bg-emerald-500' },
+  { idle: 'border-lime-100 bg-lime-50/55', done: 'border-lime-200 bg-lime-50', current: 'border-lime-500 bg-lime-50 ring-1 ring-lime-200', accent: 'bg-lime-500' },
+];
+
 export function OrderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -169,6 +182,19 @@ export function OrderDetailPage() {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (order.estado !== 'LEVANTAMIENTO_PROFORMA') return;
+
+    const shouldDelete = window.confirm(
+      `Se eliminara permanentemente la orden ${order.numero_orden}. Esta accion no se puede deshacer. Deseas continuar?`,
+    );
+
+    if (!shouldDelete) return;
+
+    await deleteMockOrder(order.id);
+    navigate('/ordenes');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <PageHeader
@@ -176,10 +202,18 @@ export function OrderDetailPage() {
         title={order.numero_orden}
         description={`${order.placa} · ${order.marca} ${order.modelo}`}
         action={(
-          <Button variant="outline" onClick={() => navigate('/ordenes')}>
-            <ArrowLeft className="h-4 w-4" />
-            Volver
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {order.estado === 'LEVANTAMIENTO_PROFORMA' ? (
+              <Button variant="destructive" onClick={handleDeleteOrder}>
+                <Trash2 className="h-4 w-4" />
+                Eliminar OT
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => navigate('/ordenes')}>
+              <ArrowLeft className="h-4 w-4" />
+              Volver
+            </Button>
+          </div>
         )}
       />
 
@@ -256,19 +290,21 @@ export function OrderDetailPage() {
               {orderFlow.map((status, index) => {
                 const isDone = index < currentIndex;
                 const isCurrent = status === order.estado;
+                const style = flowStepStyles[index % flowStepStyles.length];
                 return (
                   <div
                     key={status}
-                    className={`rounded-lg border p-3 ${
+                    className={`relative overflow-hidden rounded-lg border p-3 transition-colors ${
                       isCurrent
-                        ? 'border-blue-500 bg-blue-50'
+                        ? style.current
                         : isDone
-                          ? 'border-green-200 bg-green-50'
-                          : 'border-gray-200 bg-white'
+                          ? style.done
+                          : style.idle
                     }`}
                   >
+                    <span className={`absolute inset-y-0 left-0 w-1 ${style.accent}`} />
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className="pl-2">
                         <p className="text-sm font-medium text-gray-900">{orderStatusLabel(status)}</p>
                         <p className="mt-1 text-xs text-gray-500">Paso {index + 1} de {orderFlow.length}</p>
                       </div>
@@ -502,7 +538,7 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
     return operacion
       ? {
         ...process,
-        tareas: upsertLast(process.tareas, nextTask),
+        tareas: appendItem(process.tareas, nextTask),
       }
       : process;
   }
@@ -538,6 +574,10 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
 
 function upsertLast<T>(items: T[], nextItem: T) {
   return items.length > 0 ? [...items.slice(0, -1), nextItem] : [nextItem];
+}
+
+function appendItem<T>(items: T[], nextItem: T) {
+  return [...items, nextItem];
 }
 
 function withHistoryEntry(process: MockOrderProcess, status: OrderStatus, form: StepForm): MockOrderProcess {

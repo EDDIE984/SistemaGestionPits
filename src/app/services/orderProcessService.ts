@@ -41,6 +41,26 @@ function emptyProcess(): OrderProcess {
 
 export { emptyProcess };
 
+function normalizeText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+async function findIslandIdByName(name: string, sucursalId: string) {
+  const { data } = await supabase
+    .from('islas')
+    .select('id, nombre')
+    .eq('sucursal_id', sucursalId)
+    .eq('activo', true);
+
+  const normalizedName = normalizeText(name);
+  const match = (data ?? []).find((row) => normalizeText((row as { nombre: string }).nombre) === normalizedName);
+  return match ? (match as { id: string }).id : null;
+}
+
 export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> {
   const [
     proformaResult,
@@ -292,52 +312,41 @@ export async function saveOrderStep(
     }
 
     case 'PLANIFICACION_REPARACION': {
-      const last = process.tareas.at(-1);
-      if (!last || !session) break;
+      if (!session) break;
 
-      // Look up isla_id from name
-      const { data: islaData } = await supabase
-        .from('islas')
-        .select('id')
-        .eq('nombre', last.isla)
-        .eq('sucursal_id', session.sucursal_id)
-        .maybeSingle();
-      const islaId = islaData ? (islaData as { id: string }).id : null;
-      if (!islaId) break;
+      for (const task of process.tareas) {
+        if (!task.operacion?.trim()) continue;
 
-      const costoEstimado = last.tiempo_estandar_horas * last.tarifa_hora;
+        const islaId = await findIslandIdByName(task.isla, session.sucursal_id);
+        if (!islaId) {
+          throw new Error(`No se encontro la isla "${task.isla}" para la sucursal actual`);
+        }
 
-      if (last.id) {
-        await supabase.from('orden_isla_tareas').update({
+        const costoEstimado = task.tiempo_estandar_horas * task.tarifa_hora;
+        const payload = {
           isla_id: islaId,
-          operacion_nombre: last.operacion || null,
-          tecnico_nombre: last.tecnico || null,
-          tiempo_estandar_original: last.tiempo_estandar_horas,
-          tiempo_estandar_ajustado: last.tiempo_estandar_horas,
-          tarifa_hora_aplicada: last.tarifa_hora,
+          operacion_nombre: task.operacion || null,
+          tecnico_nombre: task.tecnico || null,
+          tiempo_estandar_original: task.tiempo_estandar_horas,
+          tiempo_estandar_ajustado: task.tiempo_estandar_horas,
+          tarifa_hora_aplicada: task.tarifa_hora,
           costo_estimado: costoEstimado,
-          fecha_inicio_planificada: last.fecha_inicio_planificada || new Date().toISOString(),
-          fecha_fin_planificada: last.fecha_fin_planificada || new Date().toISOString(),
-          motivo_ajuste: last.motivo_ajuste || null,
-          observaciones: last.observaciones || null,
-        }).eq('id', last.id);
-      } else {
-        const { data } = await supabase.from('orden_isla_tareas').insert({
-          orden_id: orderId,
-          isla_id: islaId,
-          operacion_nombre: last.operacion || null,
-          tecnico_nombre: last.tecnico || null,
-          tiempo_estandar_original: last.tiempo_estandar_horas,
-          tiempo_estandar_ajustado: last.tiempo_estandar_horas,
-          tarifa_hora_aplicada: last.tarifa_hora,
-          costo_estimado: costoEstimado,
-          fecha_inicio_planificada: last.fecha_inicio_planificada || new Date().toISOString(),
-          fecha_fin_planificada: last.fecha_fin_planificada || new Date().toISOString(),
-          estado: 'PENDIENTE',
-          motivo_ajuste: last.motivo_ajuste || null,
-          observaciones: last.observaciones || null,
-        }).select('id').single();
-        if (data) last.id = (data as { id: string }).id;
+          fecha_inicio_planificada: task.fecha_inicio_planificada || new Date().toISOString(),
+          fecha_fin_planificada: task.fecha_fin_planificada || new Date().toISOString(),
+          motivo_ajuste: task.motivo_ajuste || null,
+          observaciones: task.observaciones || null,
+        };
+
+        if (task.id) {
+          await supabase.from('orden_isla_tareas').update(payload).eq('id', task.id);
+        } else {
+          const { data } = await supabase.from('orden_isla_tareas').insert({
+            orden_id: orderId,
+            ...payload,
+            estado: 'PENDIENTE',
+          }).select('id').single();
+          if (data) task.id = (data as { id: string }).id;
+        }
       }
       break;
     }
@@ -452,12 +461,16 @@ export async function executeIslandTask(
 
   // Auto-advance order when all tasks are done
   if (action === 'FINALIZAR') {
-    const { data: tareas } = await supabase
+    const { data: tareas, error } = await supabase
       .from('orden_isla_tareas')
       .select('estado')
       .eq('orden_id', orderId);
 
-    const allDone = tareas?.every((t) => (t as { estado: string }).estado === 'COMPLETADA');
+    if (error) throw error;
+
+    const taskStates = (tareas ?? []) as Array<{ estado: string }>;
+    const allDone = taskStates.length > 0 && taskStates.every((t) => t.estado === 'COMPLETADA');
+
     if (allDone) {
       await updateOrderStatus(orderId, 'CONTROL_CALIDAD', 'Todas las tareas de isla fueron finalizadas.');
     }

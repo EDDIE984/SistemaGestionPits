@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { SlidersHorizontal, Save } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
+import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Textarea } from '@/app/components/ui/textarea';
+import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime, formatMoney } from '@/app/lib/format';
 import { modifyMockIslandTask, useMockOrderProcesses, useMockOrders } from '@/app/store/mockOrders';
 
@@ -22,7 +24,9 @@ interface ModificationForm {
 export function ModificationsPage() {
   const orders = useMockOrders();
   const processes = useMockOrderProcesses();
-  const tasks = orders.flatMap((order) => {
+  const sucursalScope = useSucursalScope();
+  const scopedOrders = orders.filter((order) => matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId));
+  const tasks = scopedOrders.flatMap((order) => {
     const process = processes[order.id];
     return (process?.tareas ?? []).map((task) => ({
       ...task,
@@ -31,6 +35,7 @@ export function ModificationsPage() {
       placa: order.placa,
       vehiculo: `${order.marca} ${order.modelo}`,
       estado_orden: order.estado,
+      sucursal_id: order.sucursal_id,
     }));
   });
 
@@ -96,6 +101,18 @@ export function ModificationsPage() {
         title="Modificaciones"
         description="Ajusta tareas planificadas, reasigna tecnico, cambia fechas o tarifa y deja historial para auditoria."
       />
+
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <SucursalScopeControl
+            isAdmin={sucursalScope.isAdmin}
+            sucursales={sucursalScope.sucursales}
+            selectedSucursalId={sucursalScope.selectedSucursalId}
+            selectedSucursalName={sucursalScope.selectedSucursalName}
+            onSucursalChange={sucursalScope.setSelectedSucursalId}
+          />
+        </CardContent>
+      </Card>
 
       {tasks.length === 0 ? (
         <Card>

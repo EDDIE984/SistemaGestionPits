@@ -14,6 +14,7 @@ export interface AseguradoraOption {
 export interface IslaOption {
   id: string;
   nombre: string;
+  sucursal_id?: string;
 }
 
 export async function fetchSucursales(): Promise<SucursalOption[]> {
@@ -39,8 +40,18 @@ export async function fetchAseguradoras(): Promise<AseguradoraOption[]> {
 export async function fetchIslas(sucursalId: string): Promise<IslaOption[]> {
   const { data, error } = await supabase
     .from('islas')
-    .select('id, nombre')
+    .select('id, nombre, sucursal_id')
     .eq('sucursal_id', sucursalId)
+    .eq('activo', true)
+    .order('nombre');
+  if (error) throw error;
+  return (data ?? []) as IslaOption[];
+}
+
+export async function fetchAllIslas(): Promise<IslaOption[]> {
+  const { data, error } = await supabase
+    .from('islas')
+    .select('id, nombre, sucursal_id')
     .eq('activo', true)
     .order('nombre');
   if (error) throw error;

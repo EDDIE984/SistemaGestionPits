@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
+import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
+import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime } from '@/app/lib/format';
 import { useMockOrderProcesses, useMockOrders } from '@/app/store/mockOrders';
 
@@ -18,7 +20,9 @@ type GanttView = 'diaria' | 'semanal';
 export function GanttPage() {
   const orders = useMockOrders();
   const processes = useMockOrderProcesses();
-  const allTasks = orders
+  const sucursalScope = useSucursalScope();
+  const scopedOrders = orders.filter((order) => matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId));
+  const allTasks = scopedOrders
     .filter((order) => order.estado !== 'ENTREGADO')
     .flatMap((order) => {
       const process = processes[order.id];
@@ -28,6 +32,7 @@ export function GanttPage() {
         orden_id: order.id,
         numero_orden: order.numero_orden,
         placa: order.placa,
+        sucursal_id: order.sucursal_id,
       }));
     });
   const [selectedDate, setSelectedDate] = useState(() => initialGanttDate(allTasks));
@@ -66,6 +71,15 @@ export function GanttPage() {
               <p className="mt-1 text-sm text-gray-600">{tasks.length} tarea(s) planificada(s) para la vista seleccionada.</p>
             </div>
             <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-64">
+                <SucursalScopeControl
+                  isAdmin={sucursalScope.isAdmin}
+                  sucursales={sucursalScope.sucursales}
+                  selectedSucursalId={sucursalScope.selectedSucursalId}
+                  selectedSucursalName={sucursalScope.selectedSucursalName}
+                  onSucursalChange={sucursalScope.setSelectedSucursalId}
+                />
+              </div>
               <Tabs value={view} onValueChange={(value) => setView(value as GanttView)}>
                 <TabsList>
                   <TabsTrigger value="diaria">Diaria</TabsTrigger>

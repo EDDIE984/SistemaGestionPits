@@ -1,8 +1,10 @@
 import { BarChart3, ClipboardList, Clock, DollarSign, Download, History, UserCheck, Wrench } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
+import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Progress } from '@/app/components/ui/progress';
+import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
 import { useMockOrderProcesses, useMockOrders } from '@/app/store/mockOrders';
 import type { OrderStatus } from '@/app/types';
@@ -10,7 +12,9 @@ import type { OrderStatus } from '@/app/types';
 export function ReportsPage() {
   const orders = useMockOrders();
   const processes = useMockOrderProcesses();
-  const tasks = orders.flatMap((order) => {
+  const sucursalScope = useSucursalScope();
+  const scopedOrders = orders.filter((order) => matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId));
+  const tasks = scopedOrders.flatMap((order) => {
     const process = processes[order.id];
     return (process?.tareas ?? []).map((task, index) => ({
       ...task,
@@ -19,9 +23,10 @@ export function ReportsPage() {
       numero_orden: order.numero_orden,
       placa: order.placa,
       estado_orden: order.estado,
+      sucursal_id: order.sucursal_id,
     }));
   });
-  const events = orders.flatMap((order) => {
+  const events = scopedOrders.flatMap((order) => {
     const process = processes[order.id];
     return (process?.historial ?? []).map((event) => ({
       ...event,
@@ -29,7 +34,7 @@ export function ReportsPage() {
       placa: order.placa,
     }));
   }).sort((a, b) => new Date(b.fecha_hora).getTime() - new Date(a.fecha_hora).getTime());
-  const ordersByStatus = orders.reduce<Record<string, number>>((acc, order) => {
+  const ordersByStatus = scopedOrders.reduce<Record<string, number>>((acc, order) => {
     acc[order.estado] = (acc[order.estado] ?? 0) + 1;
     return acc;
   }, {});
@@ -47,8 +52,20 @@ export function ReportsPage() {
         action={<Button variant="outline"><Download className="h-4 w-4" />Exportar</Button>}
       />
 
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <SucursalScopeControl
+            isAdmin={sucursalScope.isAdmin}
+            sucursales={sucursalScope.sucursales}
+            selectedSucursalId={sucursalScope.selectedSucursalId}
+            selectedSucursalName={sucursalScope.selectedSucursalName}
+            onSucursalChange={sucursalScope.setSelectedSucursalId}
+          />
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="Ordenes" value={String(orders.length)} detail="Registradas en mock" icon={ClipboardList} />
+        <MetricCard title="Ordenes" value={String(scopedOrders.length)} detail="Registradas en mock" icon={ClipboardList} />
         <MetricCard title="Tareas isla" value={String(tasks.length)} detail={`${completedTasks.length} completadas`} icon={Wrench} />
         <MetricCard title="Atrasos" value={String(delayedTasks.length)} detail="Fin planificado vencido" icon={Clock} />
         <MetricCard title="Costo estimado" value={formatMoney(estimatedCost)} detail="Mano de obra planificada" icon={DollarSign} />
@@ -64,7 +81,7 @@ export function ReportsPage() {
               <EmptyText text="No hay ordenes registradas." />
             ) : (
               Object.entries(ordersByStatus).map(([status, count]) => {
-                const percent = orders.length ? (count / orders.length) * 100 : 0;
+                const percent = scopedOrders.length ? (count / scopedOrders.length) * 100 : 0;
                 return (
                   <div key={status}>
                     <div className="mb-2 flex items-center justify-between text-sm">

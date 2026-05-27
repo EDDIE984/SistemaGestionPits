@@ -25,6 +25,7 @@ export async function fetchOrders(): Promise<WorkshopOrder[]> {
     .from('ordenes')
     .select(`
       id,
+      sucursal_id,
       numero_orden,
       estado,
       fecha_ingreso,
@@ -52,6 +53,7 @@ export async function fetchOrders(): Promise<WorkshopOrder[]> {
       id: r['id'] as string,
       numero_orden: r['numero_orden'] as string,
       estado,
+      sucursal_id: r['sucursal_id'] as string,
       sucursal: suc?.nombre ?? '',
       placa: veh?.placa ?? '',
       marca: veh?.marca ?? '',
@@ -186,7 +188,7 @@ export async function createOrder(input: {
       asesor_id: asesorId,
       aseguradora_id: input.aseguradora_id || null,
       numero_orden: numeroOrden,
-      estado: 'INGRESADA',
+      estado: 'LEVANTAMIENTO_PROFORMA',
       observaciones: input.observaciones || null,
     })
     .select('id')
@@ -222,4 +224,14 @@ export async function updateOrderStatus(
       observacion: observacion || null,
     });
   }
+}
+
+export async function deleteOrder(orderId: string): Promise<void> {
+  const { error } = await supabase
+    .from('ordenes')
+    .delete()
+    .eq('id', orderId)
+    .eq('estado', 'LEVANTAMIENTO_PROFORMA');
+
+  if (error) throw error;
 }

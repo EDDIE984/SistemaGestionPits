@@ -41,6 +41,9 @@ function firstRecord(value: unknown): LookupRecord {
     record.response,
     record.consulta,
     record.vehiculo,
+    record.vehicle,
+    record.car,
+    record.auto,
     record.persona,
   ];
 
@@ -120,12 +123,12 @@ export async function lookupPlaca(placa: string): Promise<PlacaLookupResult> {
   const record = firstRecord(payload);
 
   return {
-    placa: pickString(record, ['placa', 'plate']),
-    marca: pickString(record, ['marca', 'brand']),
-    modelo: pickString(record, ['modelo', 'model']),
-    chasis: pickString(record, ['chasis', 'vin', 'serie']),
+    placa: pickString(record, ['placa', 'plate', 'numeroPlaca', 'numero_placa']),
+    marca: pickString(record, ['marca', 'brand', 'descripcionMarca', 'descripcion_marca']),
+    modelo: pickString(record, ['modelo', 'model', 'descripcionModelo', 'descripcion_modelo']),
+    chasis: pickString(record, ['chasis', 'vin', 'serie', 'numeroChasis', 'numero_chasis']),
     motor: pickString(record, ['motor', 'numeroMotor', 'numero_motor']),
-    anio: pickString(record, ['anio', 'ano', 'year']),
+    anio: pickString(record, ['anio', 'ano', 'year', 'modeloAnio', 'modelo_anio']),
     color: pickString(record, ['color']),
     raw: payload,
   };

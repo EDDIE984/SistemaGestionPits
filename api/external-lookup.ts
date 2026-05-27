@@ -51,19 +51,37 @@ async function lookupCedula(value: string) {
 async function lookupPlaca(value: string) {
   const baseUrl = getRequiredEnv('API_PLACA_URL', 'VITE_API_PLACA_URL');
   const token = getRequiredEnv('API_PLACA_TOKEN', 'VITE_API_PLACA_TOKEN');
+  const cookie = process.env.API_PLACA_COOKIE || process.env.VITE_API_PLACA_COOKIE;
   const url = `${baseUrl.replace(/\/$/, '')}/${encodeURIComponent(value)}`;
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+
+  if (cookie) {
+    headers.Cookie = cookie;
+  }
 
   const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
   });
   const payload = await readResponse(response);
 
   if (!response.ok) {
+    const detail = typeof payload === 'string'
+      ? payload
+      : payload && typeof payload === 'object' && 'message' in payload
+        ? String((payload as { message: unknown }).message)
+        : null;
+
     return {
       status: response.status,
-      body: { error: `Consulta de placa fallida (${response.status})`, detail: payload },
+      body: {
+        error: detail
+          ? `Consulta de placa fallida (${response.status}): ${detail}`
+          : `Consulta de placa fallida (${response.status})`,
+        detail: payload,
+      },
     };
   }
 

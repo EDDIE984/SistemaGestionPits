@@ -60,6 +60,8 @@ export function Login() {
           <h2 className="mt-4 text-4xl font-medium leading-tight text-gray-900">
             Ordenes, islas y tiempos reales en una sola pantalla de trabajo.
           </h2>
+        </div>
+
         <p className="mt-6 text-xs text-gray-400">© OneWayEc</p>
       </section>
 

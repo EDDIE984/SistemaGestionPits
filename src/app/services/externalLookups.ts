@@ -81,6 +81,10 @@ async function invokeExternalLookup(type: 'cedula' | 'placa', value: string) {
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
 
+  if (response.status === 404) {
+    throw new Error('No se encontro /api/external-lookup. En local usa vercel dev; en produccion revisa que Vercel haya redeployado la funcion.');
+  }
+
   if (!response.ok || (payload && typeof payload === 'object' && 'error' in payload)) {
     const message = payload && typeof payload === 'object' && 'error' in payload
       ? String((payload as { error: unknown }).error)

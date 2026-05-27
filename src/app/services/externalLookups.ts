@@ -62,6 +62,11 @@ function pickString(record: LookupRecord, keys: string[]) {
   return undefined;
 }
 
+function joinStrings(values: Array<string | undefined>) {
+  const parts = values.filter((value): value is string => Boolean(value?.trim()));
+  return parts.length ? parts.join(', ') : undefined;
+}
+
 async function invokeExternalLookup(type: 'cedula' | 'placa', value: string) {
   const response = await fetch('/api/external-lookup', {
     method: 'POST',
@@ -86,6 +91,8 @@ async function invokeExternalLookup(type: 'cedula' | 'placa', value: string) {
 export async function lookupCedula(cedula: string): Promise<CedulaLookupResult> {
   const payload = await invokeExternalLookup('cedula', cedula);
   const record = firstRecord(payload);
+  const calleDomicilio = pickString(record, ['calleDomicilio', 'calle_domicilio']);
+  const lugarDomicilio = pickString(record, ['lugarDomicilio', 'lugar_domicilio']);
 
   return {
     nombre: pickString(record, [
@@ -97,10 +104,13 @@ export async function lookupCedula(cedula: string): Promise<CedulaLookupResult> 
       'razon_social',
       'cliente',
     ]),
-    direccion: pickString(record, ['direccion', 'domicilio', 'calle']),
+    direccion: joinStrings([
+      calleDomicilio,
+      lugarDomicilio,
+    ]) ?? pickString(record, ['direccion', 'domicilio', 'calle']),
     telefono: pickString(record, ['telefono', 'celular', 'movil', 'phone']),
     correo: pickString(record, ['correo', 'email', 'mail']),
-    ciudad: pickString(record, ['ciudad', 'canton', 'localidad']),
+    ciudad: pickString(record, ['ciudad', 'canton', 'localidad']) ?? lugarDomicilio,
     raw: payload,
   };
 }

@@ -69,13 +69,6 @@ CREATE TABLE roles (
   activo      BOOLEAN NOT NULL DEFAULT true
 );
 
-CREATE TABLE permisos (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  modulo      TEXT NOT NULL,
-  accion      TEXT NOT NULL,
-  descripcion TEXT
-);
-
 CREATE TABLE aseguradoras (
   id       UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
   nombre   TEXT    NOT NULL,
@@ -115,13 +108,6 @@ CREATE TABLE sucursales (
   telefono    TEXT,
   activo      BOOLEAN     NOT NULL DEFAULT true,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE rol_permisos (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  rol_id     UUID NOT NULL REFERENCES roles(id),
-  permiso_id UUID NOT NULL REFERENCES permisos(id),
-  UNIQUE(rol_id, permiso_id)
 );
 
 CREATE TABLE planes_aseguradora (
@@ -435,8 +421,6 @@ ALTER TABLE companias                       DISABLE ROW LEVEL SECURITY;
 ALTER TABLE sucursales                      DISABLE ROW LEVEL SECURITY;
 ALTER TABLE islas                           DISABLE ROW LEVEL SECURITY;
 ALTER TABLE roles                           DISABLE ROW LEVEL SECURITY;
-ALTER TABLE permisos                        DISABLE ROW LEVEL SECURITY;
-ALTER TABLE rol_permisos                    DISABLE ROW LEVEL SECURITY;
 ALTER TABLE usuarios                        DISABLE ROW LEVEL SECURITY;
 ALTER TABLE tecnicos                        DISABLE ROW LEVEL SECURITY;
 ALTER TABLE tarifas_hora_hombre             DISABLE ROW LEVEL SECURITY;
@@ -548,5 +532,78 @@ BEGIN
   WHERE u.username     = p_username
     AND u.activo        = true
     AND u.password_hash = crypt(p_password, u.password_hash);
+END;
+$$;
+
+-- ── RPC: upsert_usuario ─────────────────────────────────────────
+-- Crea o actualiza usuarios desde la pantalla de configuración.
+-- La contraseña nunca se guarda en texto plano: se convierte a bcrypt.
+-- En edición, si p_password viene null o vacío, se conserva el hash actual.
+
+CREATE OR REPLACE FUNCTION upsert_usuario(
+  p_id          UUID,
+  p_sucursal_id UUID,
+  p_rol_id      UUID,
+  p_nombre      TEXT,
+  p_username    TEXT,
+  p_password    TEXT DEFAULT NULL,
+  p_email       TEXT DEFAULT NULL,
+  p_activo      BOOLEAN DEFAULT true
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_id UUID;
+BEGIN
+  IF p_id IS NULL THEN
+    IF NULLIF(p_password, '') IS NULL THEN
+      RAISE EXCEPTION 'La contrasena es obligatoria para crear usuarios';
+    END IF;
+
+    INSERT INTO usuarios (
+      sucursal_id,
+      rol_id,
+      nombre,
+      username,
+      password_hash,
+      email,
+      activo
+    )
+    VALUES (
+      p_sucursal_id,
+      p_rol_id,
+      p_nombre,
+      p_username,
+      crypt(p_password, gen_salt('bf')),
+      p_email,
+      COALESCE(p_activo, true)
+    )
+    RETURNING id INTO v_id;
+
+    RETURN v_id;
+  END IF;
+
+  UPDATE usuarios
+  SET
+    sucursal_id = p_sucursal_id,
+    rol_id = p_rol_id,
+    nombre = p_nombre,
+    username = p_username,
+    password_hash = CASE
+      WHEN NULLIF(p_password, '') IS NULL THEN password_hash
+      ELSE crypt(p_password, gen_salt('bf'))
+    END,
+    email = p_email,
+    activo = COALESCE(p_activo, true)
+  WHERE id = p_id
+  RETURNING id INTO v_id;
+
+  IF v_id IS NULL THEN
+    RAISE EXCEPTION 'Usuario no encontrado';
+  END IF;
+
+  RETURN v_id;
 END;
 $$;

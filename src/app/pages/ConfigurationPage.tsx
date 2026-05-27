@@ -10,7 +10,6 @@ const items = [
   { path: '/configuracion/usuarios', label: 'Usuarios', description: 'Accesos, roles y sucursal asignada.', icon: Users },
   { path: '/configuracion/tarifas', label: 'Tarifas', description: 'Hora hombre por sucursal, isla o tecnico.', icon: Clock3 },
   { path: '/configuracion/catalogo-operaciones', label: 'Catalogo de operaciones', description: 'Flat rate y tiempos estandar.', icon: ListChecks },
-  { path: '/configuracion/permisos', label: 'Permisos', description: 'Acciones disponibles por rol.', icon: SlidersHorizontal },
 ];
 
 export function ConfigurationPage() {

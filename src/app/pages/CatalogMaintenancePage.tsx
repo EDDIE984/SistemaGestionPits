@@ -173,11 +173,11 @@ const catalogConfigs: Record<string, CatalogConfig> = {
     orderBy: 'nombre',
     activeField: 'activo',
     fields: [
-      { key: 'sucursal_id', label: 'Sucursal', type: 'select', lookup: 'sucursales' },
+      { key: 'sucursal_id', label: 'Sucursal', type: 'select', lookup: 'sucursales', required: true },
       { key: 'rol_id', label: 'Rol', type: 'select', lookup: 'roles', required: true },
       { key: 'nombre', label: 'Nombre', type: 'text', required: true },
       { key: 'username', label: 'Usuario', type: 'text', required: true },
-      { key: 'password_hash', label: 'Hash de clave', type: 'password', required: true },
+      { key: 'password_hash', label: 'Contrasena', type: 'password' },
       { key: 'email', label: 'Email', type: 'text' },
       { key: 'activo', label: 'Activo', type: 'boolean' },
     ],
@@ -237,24 +237,6 @@ const catalogConfigs: Record<string, CatalogConfig> = {
       { key: 'activo', label: 'Estado', render: (row) => formatBoolean(row.activo) },
     ],
   },
-  permisos: {
-    slug: 'permisos',
-    table: 'permisos',
-    title: 'Permisos',
-    description: 'Acciones disponibles por rol.',
-    select: '*',
-    orderBy: 'modulo',
-    fields: [
-      { key: 'modulo', label: 'Modulo', type: 'text', required: true },
-      { key: 'accion', label: 'Accion', type: 'text', required: true },
-      { key: 'descripcion', label: 'Descripcion', type: 'textarea' },
-    ],
-    columns: [
-      { key: 'modulo', label: 'Modulo' },
-      { key: 'accion', label: 'Accion' },
-      { key: 'descripcion', label: 'Descripcion' },
-    ],
-  },
 };
 
 const lookupQueries: Record<string, { table: string; select: string; orderBy: string; map: (row: CatalogRow) => string }> = {
@@ -279,6 +261,19 @@ function cleanPayload(config: CatalogConfig, formData: CatalogRow) {
     payload[field.key] = rawValue === '' || rawValue === undefined ? null : rawValue;
     return payload;
   }, {});
+}
+
+async function saveUser(formData: CatalogRow, currentRow: CatalogRow | null) {
+  return supabase.rpc('upsert_usuario', {
+    p_id: currentRow?.id ?? null,
+    p_sucursal_id: formData.sucursal_id,
+    p_rol_id: formData.rol_id,
+    p_nombre: formData.nombre,
+    p_username: formData.username,
+    p_password: formData.password_hash || null,
+    p_email: formData.email || null,
+    p_activo: formData.activo ?? true,
+  });
 }
 
 function getDefaultFormData(config: CatalogConfig) {
@@ -353,7 +348,7 @@ export function CatalogMaintenancePage() {
 
   const openEditDialog = (row: CatalogRow) => {
     setCurrentRow(row);
-    setFormData(row);
+    setFormData(config?.slug === 'usuarios' ? { ...row, password_hash: '' } : row);
     setIsDialogOpen(true);
   };
 
@@ -364,13 +359,19 @@ export function CatalogMaintenancePage() {
       toast.error(`Completa el campo ${missingField.label}`);
       return;
     }
+    if (config.slug === 'usuarios' && !currentRow && !formData.password_hash) {
+      toast.error('Completa el campo Contrasena');
+      return;
+    }
 
     setIsSaving(true);
-    const payload = cleanPayload(config, formData);
-    const request = currentRow
-      ? supabase.from(config.table).update(payload).eq('id', currentRow.id)
-      : supabase.from(config.table).insert(payload);
-    const { error } = await request;
+    const { error } = config.slug === 'usuarios'
+      ? await saveUser(formData, currentRow)
+      : await (
+        currentRow
+          ? supabase.from(config.table).update(cleanPayload(config, formData)).eq('id', currentRow.id)
+          : supabase.from(config.table).insert(cleanPayload(config, formData))
+      );
 
     setIsSaving(false);
     if (error) {

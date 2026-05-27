@@ -85,7 +85,7 @@ Incluye:
 - Planes de aseguradora
 - Islas de trabajo
 - Usuarios
-- Roles y permisos
+- Roles
 - Tecnicos
 - Tarifas hora hombre
 - Catalogo de operaciones
@@ -490,8 +490,6 @@ Las notificaciones se muestran en un icono de campana en el header y en una band
 companias
 sucursales
 roles
-permisos
-rol_permisos
 usuarios
 tecnicos
 tarifas_hora_hombre
@@ -669,7 +667,7 @@ No se debe construir una landing page. La primera vista despues del login debe s
 - Sucursales
 - Aseguradoras y planes
 - Islas
-- Roles y permisos
+- Roles
 - Usuarios (con hash de contrasena)
 - Tecnicos
 - Tarifas hora hombre
@@ -733,7 +731,7 @@ No se debe construir una landing page. La primera vista despues del login debe s
 
 - Pruebas del flujo completo por rol
 - Validacion responsive
-- Validacion de permisos por pantalla
+- Validacion de acceso por rol
 - Validacion de calculos (eficiencia, pausas, tarifas)
 - Revision visual contra `STYLE_GUIDE.md`
 

@@ -46,19 +46,6 @@ erDiagram
         boolean activo
     }
 
-    permisos {
-        uuid    id          PK
-        string  modulo
-        string  accion
-        string  descripcion
-    }
-
-    rol_permisos {
-        uuid    id          PK
-        uuid    rol_id      FK
-        uuid    permiso_id  FK
-    }
-
     usuarios {
         uuid    id            PK
         uuid    sucursal_id   FK
@@ -373,9 +360,6 @@ erDiagram
     sucursales          ||--o{ checklist_calidad_puntos         : "configura"
 
     roles               ||--o{ usuarios                         : "asignado a"
-    roles               ||--o{ rol_permisos                     : "tiene"
-    permisos            ||--o{ rol_permisos                     : "incluido en"
-
     usuarios            ||--o{ tecnicos                         : "es"
     usuarios            ||--o{ ordenes                          : "asesora"
     usuarios            ||--o{ orden_estados_historial          : "registra"
@@ -441,9 +425,7 @@ erDiagram
 
 | Tabla | Proposito |
 |---|---|
-| `roles` | Roles del sistema: ADMINISTRADOR, ASESOR, OPERARIO, JEFE_TALLER, VISUALIZADOR |
-| `permisos` | Acciones permitidas por modulo |
-| `rol_permisos` | Relacion N:M entre roles y permisos |
+| `roles` | Roles del sistema usados para clasificar usuarios |
 | `usuarios` | Usuarios del sistema con contrasena hasheada (bcrypt). Sesion manejada via localStorage + React Context |
 | `tecnicos` | Extension de usuarios que trabajan en islas. Incluye isla principal y especialidades |
 

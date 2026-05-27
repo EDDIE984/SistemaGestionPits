@@ -133,13 +133,13 @@ export async function lookupPlaca(placa: string): Promise<PlacaLookupResult> {
   const record = firstRecord(payload);
 
   return {
-    placa: pickString(record, ['placa', 'plate', 'numeroPlaca', 'numero_placa']),
-    marca: pickString(record, ['marca', 'brand', 'descripcionMarca', 'descripcion_marca']),
-    modelo: pickString(record, ['modelo', 'model', 'descripcionModelo', 'descripcion_modelo']),
-    chasis: pickString(record, ['chasis', 'vin', 'serie', 'numeroChasis', 'numero_chasis']),
-    motor: pickString(record, ['motor', 'numeroMotor', 'numero_motor']),
-    anio: pickString(record, ['anio', 'ano', 'year', 'modeloAnio', 'modelo_anio']),
-    color: pickString(record, ['color']),
+    placa: pickString(record, ['Placa', 'placa', 'plate', 'numeroPlaca', 'numero_placa']),
+    marca: pickString(record, ['Marca', 'marca', 'brand', 'descripcionMarca', 'descripcion_marca']),
+    modelo: pickString(record, ['Modelo', 'modelo', 'model', 'descripcionModelo', 'descripcion_modelo']),
+    chasis: pickString(record, ['Chasis', 'chasis', 'vin', 'serie', 'numeroChasis', 'numero_chasis']),
+    motor: pickString(record, ['Motor', 'motor', 'numeroMotor', 'numero_motor']),
+    anio: pickString(record, ['Año', 'anio', 'ano', 'year', 'modeloAnio', 'modelo_anio']),
+    color: pickString(record, ['Color', 'color']),
     raw: payload,
   };
 }

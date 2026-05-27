@@ -1,12 +1,10 @@
 import { FormEvent, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router';
-import { AlertCircle, LockKeyhole, Wrench } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/app/auth/AuthContext';
-import { Button } from '@/app/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/app/components/ui/alert';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from '@/app/components/ui/alert';
 
 export function Login() {
   const navigate = useNavigate();
@@ -43,94 +41,114 @@ export function Login() {
   };
 
   return (
-    <div className="grid min-h-screen grid-cols-1 bg-gray-50 lg:grid-cols-[1.05fr_0.95fr]">
-      <section className="hidden border-r border-gray-200 bg-white p-10 lg:flex lg:flex-col lg:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-            <Wrench className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">OneWayEc</p>
-            <h1 className="text-2xl text-gray-900">Gestion PITS</h1>
-          </div>
+    <div className="flex min-h-screen">
+      {/* Panel izquierdo — marca */}
+      <section className="hidden lg:flex lg:w-[55%] flex-col justify-between bg-white border-r border-gray-100 p-12">
+        <div>
+          <img
+            src="/images/Logo_Pits.webp"
+            alt="PITS Latonería y Pintura Express"
+            className="w-[200px]"
+          />
+          <hr className="mt-6 border-0 h-[3px] bg-[#4DBFB8]" />
         </div>
 
-        <div className="max-w-xl">
-          <p className="text-sm uppercase tracking-wider text-blue-600">Operacion de taller</p>
-          <h2 className="mt-4 text-4xl font-medium leading-tight text-gray-950">
+        <div className="max-w-lg">
+          <p className="text-xs font-medium uppercase tracking-widest text-[#4DBFB8]">
+            Gestión de Taller
+          </p>
+          <h2 className="mt-4 text-4xl font-medium leading-tight text-gray-900">
             Ordenes, islas y tiempos reales en una sola pantalla de trabajo.
           </h2>
-          <p className="mt-4 text-base leading-7 text-gray-600">
-            Sistema de gestion conectado a Supabase para controlar estados y proyectar el avance del taller.
+          <p className="mt-4 text-base leading-7 text-gray-500">
+            Sistema conectado a Supabase para controlar estados y proyectar el avance del taller.
           </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 text-sm">
-          <div className="rounded-lg border border-gray-200 p-4">
-            <p className="text-2xl font-semibold text-gray-900">4</p>
-            <p className="text-gray-500">islas base</p>
+        <div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { value: '4', label: 'islas base' },
+              { value: '10', label: 'estados' },
+              { value: 'Flat', label: 'rate listo' },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-lg border border-[#4DBFB8]/20 bg-[#E8F7F6] p-4"
+              >
+                <p className="text-2xl font-semibold text-[#4DBFB8]">{stat.value}</p>
+                <p className="text-sm text-gray-500">{stat.label}</p>
+              </div>
+            ))}
           </div>
-          <div className="rounded-lg border border-gray-200 p-4">
-            <p className="text-2xl font-semibold text-gray-900">10</p>
-            <p className="text-gray-500">estados</p>
-          </div>
-          <div className="rounded-lg border border-gray-200 p-4">
-            <p className="text-2xl font-semibold text-gray-900">Flat</p>
-            <p className="text-gray-500">rate listo</p>
-          </div>
+          <p className="mt-6 text-xs text-gray-400">© OneWayEc</p>
         </div>
       </section>
 
-      <main className="flex items-center justify-center p-6">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-              <LockKeyhole className="h-5 w-5" />
+      {/* Panel derecho — formulario */}
+      <main className="flex w-full lg:w-[45%] items-center justify-center bg-[#f8fafc] p-8">
+        <div className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-8 shadow-sm">
+          <img
+            src="/images/Logo_Pits.webp"
+            alt="PITS"
+            className="mb-6 w-[120px] lg:hidden"
+          />
+
+          <h1 className="text-2xl font-semibold text-gray-900">Iniciar sesión</h1>
+          <p className="mt-1 mb-6 text-sm text-gray-500">
+            Ingresa tus credenciales para acceder al sistema.
+          </p>
+
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            {error ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>No se pudo ingresar</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div className="space-y-2">
+              <Label htmlFor="username">Usuario</Label>
+              <Input
+                id="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+                disabled={isLoading}
+                className="focus-visible:ring-[#4DBFB8]"
+              />
             </div>
-            <CardTitle>Iniciar sesion</CardTitle>
-            <CardDescription>
-              Ingresa tus credenciales para acceder al sistema.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              {error ? (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>No se pudo ingresar</AlertTitle>
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              ) : null}
 
-              <div className="space-y-2">
-                <Label htmlFor="username">Usuario</Label>
-                <Input
-                  id="username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  autoComplete="username"
-                  disabled={isLoading}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Contraseña</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                disabled={isLoading}
+                className="focus-visible:ring-[#4DBFB8]"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  disabled={isLoading}
-                />
-              </div>
-
-              <Button className="w-full" type="submit" disabled={isLoading}>
-                {isLoading ? 'Verificando...' : 'Entrar'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#4DBFB8] text-sm font-medium text-white transition-colors hover:bg-[#3DAFA8] disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Verificando...
+                </>
+              ) : (
+                'Entrar'
+              )}
+            </button>
+          </form>
+        </div>
       </main>
     </div>
   );

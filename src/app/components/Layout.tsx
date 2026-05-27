@@ -22,7 +22,7 @@ export function Layout() {
   const { user, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const menuItems = [
+  const allMenuItems = [
     { path: '/', label: 'Dashboard', icon: Gauge },
     { path: '/ordenes', label: 'Ordenes', icon: ClipboardList },
     { path: '/ordenes/nueva', label: 'Nueva orden', icon: PlusCircle },
@@ -32,8 +32,12 @@ export function Layout() {
     { path: '/gantt', label: 'Gantt', icon: CalendarDays },
     { path: '/reportes', label: 'Reportes', icon: BarChart3 },
     { path: '/notificaciones', label: 'Notificaciones', icon: Bell },
-    { path: '/configuracion', label: 'Configuracion', icon: Settings },
+    { path: '/configuracion', label: 'Configuracion', icon: Settings, roles: ['ADMINISTRADOR'] },
   ];
+
+  const menuItems = allMenuItems.filter(
+    (item) => !item.roles || (user?.rol && item.roles.includes(user.rol))
+  );
 
   return (
     <div className="flex h-screen bg-gray-50">

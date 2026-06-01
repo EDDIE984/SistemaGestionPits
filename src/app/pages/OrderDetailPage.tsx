@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ArrowLeft, CalendarClock, Car, ClipboardCheck, ClipboardList, Factory, Trash2, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Car, ClipboardCheck, ClipboardList, Factory, Printer, Trash2, UserRound } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
+import { printOrderBarcode } from '@/app/components/OrderBarcodeLabel';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -30,13 +31,26 @@ type StepForm = Record<string, string | boolean>;
 const initialForms: Record<OrderStatus, StepForm> = {
   INGRESADA: { observacion: 'Ingreso revisado para iniciar proforma.' },
   LEVANTAMIENTO_PROFORMA: {
+    tipo_cliente: 'PARTICULAR',
     pieza: '',
     categoria_dano: 'K3',
-    observacion: '',
+    observacion_pieza: '',
     requiere_reemplazo: false,
-    aplica_aseguradora: true,
     costo_estimado: '',
-    foto_url: '',
+    foto_url_pieza: '',
+    estado_aprobacion: 'PENDIENTE_ENVIO',
+    fecha_envio: '',
+    fecha_aprobacion: '',
+    observaciones_aprobacion: '',
+    documento_url: '',
+    descripcion_repuesto: '',
+    cantidad_repuesto: '1',
+    estado_repuesto: 'PENDIENTE',
+    proveedor: '',
+    fecha_estimada_llegada: '',
+    fecha_real_llegada: '',
+    costo_repuesto: '',
+    observaciones_repuesto: '',
   },
   GESTION_ASEGURADORA: {
     aplica_aseguradora: true,
@@ -120,7 +134,7 @@ export function OrderDetailPage() {
 
   useEffect(() => {
     if (order && process) {
-      setForm(formFromProcess(order.estado, process));
+      setForm(formFromProcess(order.estado, process, order.tipo_cliente));
     }
   }, [order?.id, order?.estado, process]);
 
@@ -145,7 +159,7 @@ export function OrderDetailPage() {
 
   const currentIndex = orderFlow.indexOf(order.estado);
   const previousStatus = currentIndex > 0 ? orderFlow[currentIndex - 1] : null;
-  const nextStatus = getNextStatus(order.estado, form);
+  const nextStatus = getNextStatus(order.estado, form, process);
 
   const updateField = (field: string, value: string | boolean) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -203,6 +217,10 @@ export function OrderDetailPage() {
         description={`${order.placa} · ${order.marca} ${order.modelo}`}
         action={(
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => printOrderBarcode(order.numero_orden)}>
+              <Printer className="h-4 w-4" />
+              Imprimir codigo
+            </Button>
             {order.estado === 'LEVANTAMIENTO_PROFORMA' ? (
               <Button variant="destructive" onClick={handleDeleteOrder}>
                 <Trash2 className="h-4 w-4" />
@@ -271,7 +289,7 @@ export function OrderDetailPage() {
                     Guardar datos
                   </Button>
                   <Button type="submit" disabled={!nextStatus}>
-                    {nextStatus ? `Guardar y avanzar a ${orderStatusLabel(nextStatus)}` : nextBlockedLabel(order.estado)}
+                    {nextStatus ? `Guardar y avanzar a ${orderStatusLabel(nextStatus)}` : nextBlockedLabel(order.estado, form, process)}
                   </Button>
                 </div>
               </form>
@@ -346,9 +364,13 @@ export function OrderDetailPage() {
   );
 }
 
-function getNextStatus(status: OrderStatus, form: StepForm) {
-  if (status === 'LEVANTAMIENTO_PROFORMA' && form.aplica_aseguradora === false) {
-    return 'COMPRA_REPUESTO' as OrderStatus;
+function getNextStatus(status: OrderStatus, form: StepForm, process: MockOrderProcess) {
+  if (status === 'LEVANTAMIENTO_PROFORMA') {
+    const aprobada = String(form.estado_aprobacion || '') === 'APROBADO';
+    const repuestosListos = process.repuestos.length > 0
+      && process.repuestos.every((r) => r.estado === 'RECIBIDO');
+    if (!aprobada || !repuestosListos) return null;
+    return 'PLANIFICACION_REPARACION' as OrderStatus;
   }
 
   if (status === 'GESTION_ASEGURADORA') {
@@ -369,51 +391,48 @@ function getNextStatus(status: OrderStatus, form: StepForm) {
   return currentIndex < orderFlow.length - 1 ? orderFlow[currentIndex + 1] : null;
 }
 
-function nextBlockedLabel(status: OrderStatus) {
-  if (status === 'GESTION_ASEGURADORA') return 'Requiere aseguradora aprobada';
-  if (status === 'COMPRA_REPUESTO') return 'Requiere repuesto recibido';
+function nextBlockedLabel(status: OrderStatus, form: StepForm, process: MockOrderProcess) {
+  if (status === 'LEVANTAMIENTO_PROFORMA') {
+    const aprobada = String(form.estado_aprobacion || '') === 'APROBADO';
+    const repuestosListos = process.repuestos.length > 0
+      && process.repuestos.every((r) => r.estado === 'RECIBIDO');
+    if (!aprobada && !repuestosListos) return 'Requiere aprobación y repuestos';
+    if (!aprobada) return 'Requiere aprobación';
+    return 'Repuestos pendientes de recibir';
+  }
   if (status === 'ENTREGADO') return 'Orden cerrada';
   return 'No puede avanzar';
 }
 
-function formFromProcess(status: OrderStatus, process: MockOrderProcess): StepForm {
-  if (status === 'GESTION_ASEGURADORA') {
-    return {
-      ...initialForms.GESTION_ASEGURADORA,
-      ...process.aseguradora,
-    };
-  }
-
+function formFromProcess(status: OrderStatus, process: MockOrderProcess, tipo_cliente: 'PARTICULAR' | 'ASEGURADORA'): StepForm {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
-    const last = process.proforma.at(-1);
-    return last
-      ? {
-        ...initialForms.LEVANTAMIENTO_PROFORMA,
-        pieza: last.pieza,
-        categoria_dano: last.categoria_dano,
-        observacion: last.observacion,
-        requiere_reemplazo: last.requiere_reemplazo,
-        costo_estimado: String(last.costo_estimado || ''),
-        foto_url: last.foto_url,
-      }
-      : initialForms.LEVANTAMIENTO_PROFORMA;
-  }
-
-  if (status === 'COMPRA_REPUESTO') {
-    const last = process.repuestos.at(-1);
-    return last
-      ? {
-        ...initialForms.COMPRA_REPUESTO,
-        descripcion: last.descripcion,
-        cantidad: String(last.cantidad || 1),
-        estado: last.estado,
-        proveedor: last.proveedor,
-        fecha_estimada_llegada: last.fecha_estimada_llegada,
-        fecha_real_llegada: last.fecha_real_llegada,
-        costo: String(last.costo || ''),
-        observaciones: last.observaciones,
-      }
-      : initialForms.COMPRA_REPUESTO;
+    const lastPieza = process.proforma.at(-1);
+    const lastRepuesto = process.repuestos.at(-1);
+    return {
+      ...initialForms.LEVANTAMIENTO_PROFORMA,
+      tipo_cliente,
+      pieza: lastPieza?.pieza ?? '',
+      categoria_dano: lastPieza?.categoria_dano ?? 'K3',
+      observacion_pieza: lastPieza?.observacion ?? '',
+      requiere_reemplazo: lastPieza?.requiere_reemplazo ?? false,
+      costo_estimado: String(lastPieza?.costo_estimado ?? ''),
+      foto_url_pieza: lastPieza?.foto_url ?? '',
+      estado_aprobacion: ['NO_APLICA', '', undefined].includes(process.aseguradora.estado)
+        ? 'PENDIENTE_ENVIO'
+        : process.aseguradora.estado,
+      fecha_envio: process.aseguradora.fecha_envio ?? '',
+      fecha_aprobacion: process.aseguradora.fecha_aprobacion ?? '',
+      observaciones_aprobacion: process.aseguradora.observaciones ?? '',
+      documento_url: process.aseguradora.documento_url ?? '',
+      descripcion_repuesto: lastRepuesto?.descripcion ?? '',
+      cantidad_repuesto: String(lastRepuesto?.cantidad ?? 1),
+      estado_repuesto: lastRepuesto?.estado ?? 'PENDIENTE',
+      proveedor: lastRepuesto?.proveedor ?? '',
+      fecha_estimada_llegada: lastRepuesto?.fecha_estimada_llegada ?? '',
+      fecha_real_llegada: lastRepuesto?.fecha_real_llegada ?? '',
+      costo_repuesto: String(lastRepuesto?.costo ?? ''),
+      observaciones_repuesto: lastRepuesto?.observaciones ?? '',
+    };
   }
 
   if (status === 'PLANIFICACION_REPARACION') {
@@ -465,60 +484,47 @@ function formFromProcess(status: OrderStatus, process: MockOrderProcess): StepFo
 function applyStepData(process: MockOrderProcess, status: OrderStatus, form: StepForm): MockOrderProcess {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
     const pieza = String(form.pieza || '').trim();
-    const nextPiece = {
+    const updatedPieza = {
       pieza,
       categoria_dano: String(form.categoria_dano || 'K3'),
-      observacion: String(form.observacion || ''),
+      observacion: String(form.observacion_pieza || ''),
       requiere_reemplazo: Boolean(form.requiere_reemplazo),
       costo_estimado: Number(form.costo_estimado || 0),
-      foto_url: String(form.foto_url || ''),
+      foto_url: String(form.foto_url_pieza || ''),
     };
-    return pieza
-      ? {
-        ...process,
-        proforma: upsertLast(process.proforma, nextPiece),
-      }
-      : process;
-  }
 
-  if (status === 'GESTION_ASEGURADORA') {
-    return {
-      ...process,
-      aseguradora: {
-        aplica_aseguradora: Boolean(form.aplica_aseguradora),
-        estado: String(form.estado || 'NO_APLICA'),
-        fecha_envio: String(form.fecha_envio || ''),
-        fecha_aprobacion: String(form.fecha_aprobacion || ''),
-        observaciones: String(form.observaciones || ''),
-        documento_url: String(form.documento_url || ''),
-      },
+    const updatedAseguradora = {
+      ...process.aseguradora,
+      aplica_aseguradora: form.tipo_cliente === 'ASEGURADORA',
+      estado: String(form.estado_aprobacion || 'PENDIENTE_ENVIO'),
+      fecha_envio: String(form.fecha_envio || ''),
+      fecha_aprobacion: String(form.fecha_aprobacion || ''),
+      observaciones: String(form.observaciones_aprobacion || ''),
+      documento_url: String(form.documento_url || ''),
     };
-  }
 
-  if (status === 'COMPRA_REPUESTO') {
-    const descripcion = String(form.descripcion || '').trim();
+    const descripcion = String(form.descripcion_repuesto || '').trim();
     const hasRepuestoData = descripcion
       || String(form.proveedor || '').trim()
       || String(form.fecha_estimada_llegada || '').trim()
-      || Number(form.costo || 0) > 0;
-
-    const nextPart = {
+      || Number(form.costo_repuesto || 0) > 0;
+    const updatedRepuesto = {
       descripcion: descripcion || 'Repuesto por definir',
-      cantidad: Number(form.cantidad || 1),
-      estado: String(form.estado || 'PENDIENTE'),
+      cantidad: Number(form.cantidad_repuesto || 1),
+      estado: String(form.estado_repuesto || 'PENDIENTE'),
       proveedor: String(form.proveedor || ''),
       fecha_estimada_llegada: String(form.fecha_estimada_llegada || ''),
       fecha_real_llegada: String(form.fecha_real_llegada || ''),
-      costo: Number(form.costo || 0),
-      observaciones: String(form.observaciones || ''),
+      costo: Number(form.costo_repuesto || 0),
+      observaciones: String(form.observaciones_repuesto || ''),
     };
 
-    return hasRepuestoData
-      ? {
-        ...process,
-        repuestos: upsertLast(process.repuestos, nextPart),
-      }
-      : process;
+    return {
+      ...process,
+      proforma: pieza ? upsertLast(process.proforma, updatedPieza) : process.proforma,
+      aseguradora: updatedAseguradora,
+      repuestos: hasRepuestoData ? upsertLast(process.repuestos, updatedRepuesto) : process.repuestos,
+    };
   }
 
   if (status === 'PLANIFICACION_REPARACION') {
@@ -601,12 +607,16 @@ function withHistoryEntry(process: MockOrderProcess, status: OrderStatus, form: 
 function historyDataForStatus(status: OrderStatus, form: StepForm) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
     return {
+      tipo_cliente: form.tipo_cliente,
       pieza: form.pieza,
       categoria_dano: form.categoria_dano,
       requiere_reemplazo: form.requiere_reemplazo,
       costo_estimado: form.costo_estimado,
-      observacion: form.observacion,
-      aplica_aseguradora: form.aplica_aseguradora,
+      estado_aprobacion: form.estado_aprobacion,
+      fecha_envio: form.fecha_envio,
+      fecha_aprobacion: form.fecha_aprobacion,
+      descripcion_repuesto: form.descripcion_repuesto,
+      estado_repuesto: form.estado_repuesto,
     };
   }
 
@@ -651,7 +661,10 @@ function historyDataForStatus(status: OrderStatus, form: StepForm) {
 }
 
 function statusObservation(status: OrderStatus, form: StepForm) {
-  if (status === 'LEVANTAMIENTO_PROFORMA') return `Proforma registrada: ${String(form.pieza || 'sin pieza especifica')}.`;
+  if (status === 'LEVANTAMIENTO_PROFORMA') {
+    const tipo = String(form.tipo_cliente || 'PARTICULAR');
+    return `Proforma registrada (${tipo}): ${String(form.pieza || 'sin pieza')}. Aprobación: ${String(form.estado_aprobacion || 'PENDIENTE_ENVIO')}.`;
+  }
   if (status === 'GESTION_ASEGURADORA') return `Gestion aseguradora: ${String(form.estado || 'NO_APLICA')}.`;
   if (status === 'COMPRA_REPUESTO') return `Repuesto registrado: ${String(form.descripcion || 'sin repuesto especifico')}.`;
   if (status === 'PLANIFICACION_REPARACION') return `Tarea planificada: ${String(form.operacion || 'sin operacion especifica')}.`;

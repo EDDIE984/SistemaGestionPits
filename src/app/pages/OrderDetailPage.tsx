@@ -12,6 +12,7 @@ import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Progress } from '@/app/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
 import { Textarea } from '@/app/components/ui/textarea';
 import { orderFlow } from '@/app/data/mockData';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
@@ -131,6 +132,7 @@ export function OrderDetailPage() {
   const [form, setForm] = useState<StepForm>(initialForms.INGRESADA);
   const [saveNotice, setSaveNotice] = useState('');
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [activeProformaTab, setActiveProformaTab] = useState<'piezas' | 'aprobacion' | 'repuestos'>('piezas');
 
   useEffect(() => {
     if (order && process) {
@@ -282,7 +284,14 @@ export function OrderDetailPage() {
                   </div>
                 ) : null}
 
-                <StepFields status={order.estado} form={form} onChange={updateField} />
+                <StepFields
+                  status={order.estado}
+                  form={form}
+                  onChange={updateField}
+                  process={process}
+                  activeProformaTab={activeProformaTab}
+                  onProformaTabChange={setActiveProformaTab}
+                />
 
                 <div className="flex flex-wrap justify-end gap-2">
                   <Button type="button" variant="outline" onClick={() => { void saveCurrentStep(); }}>
@@ -678,58 +687,160 @@ interface StepFieldsProps {
   status: OrderStatus;
   form: StepForm;
   onChange: (field: string, value: string | boolean) => void;
+  process: MockOrderProcess;
+  activeProformaTab: 'piezas' | 'aprobacion' | 'repuestos';
+  onProformaTabChange: (tab: 'piezas' | 'aprobacion' | 'repuestos') => void;
 }
 
-function StepFields({ status, form, onChange }: StepFieldsProps) {
+function StepFields({ status, form, onChange, process, activeProformaTab, onProformaTabChange }: StepFieldsProps) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Pieza afectada" value={String(form.pieza)} onChange={(value) => onChange('pieza', value)} placeholder="Guardafango delantero" />
-          <SelectField
-            label="Categoria de dano"
-            value={String(form.categoria_dano)}
-            onChange={(value) => onChange('categoria_dano', value)}
-            options={damageCategoryOptions}
-          />
-          <Field label="Costo estimado" type="number" value={String(form.costo_estimado)} onChange={(value) => onChange('costo_estimado', value)} placeholder="0.00" />
-          <Field label="URL foto" value={String(form.foto_url)} onChange={(value) => onChange('foto_url', value)} placeholder="https://..." />
-        </div>
-        <CheckField label="Requiere reemplazo" checked={Boolean(form.requiere_reemplazo)} onChange={(value) => onChange('requiere_reemplazo', value)} />
-        <CheckField label="Aplica gestion de aseguradora al avanzar" checked={Boolean(form.aplica_aseguradora)} onChange={(value) => onChange('aplica_aseguradora', value)} />
-        <TextField label="Observacion" value={String(form.observacion)} onChange={(value) => onChange('observacion', value)} />
-      </div>
-    );
-  }
+    const tipoCliente = String(form.tipo_cliente || 'PARTICULAR') as 'PARTICULAR' | 'ASEGURADORA';
+    const aprobada = process.aseguradora.estado === 'APROBADO';
+    const repuestosListos = process.repuestos.length > 0
+      && process.repuestos.every((r) => r.estado === 'RECIBIDO');
 
-  if (status === 'GESTION_ASEGURADORA') {
     return (
       <div className="space-y-4">
-        <CheckField label="Aplica aseguradora" checked={Boolean(form.aplica_aseguradora)} onChange={(value) => onChange('aplica_aseguradora', value)} />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <SelectField label="Estado aprobacion" value={String(form.estado)} onChange={(value) => onChange('estado', value)} options={['NO_APLICA', 'PENDIENTE_ENVIO', 'ENVIADO', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSERVADO']} />
-          <Field label="Fecha envio" type="date" value={String(form.fecha_envio)} onChange={(value) => onChange('fecha_envio', value)} />
-          <Field label="Fecha aprobacion" type="date" value={String(form.fecha_aprobacion)} onChange={(value) => onChange('fecha_aprobacion', value)} />
-          <Field label="Documento adjunto URL" value={String(form.documento_url)} onChange={(value) => onChange('documento_url', value)} placeholder="https://..." />
+        {/* Selector tipo de cliente */}
+        <div className="flex items-center gap-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <span className="text-sm font-medium text-gray-700">Tipo de cliente:</span>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="tipo_cliente"
+              value="PARTICULAR"
+              checked={tipoCliente === 'PARTICULAR'}
+              onChange={() => onChange('tipo_cliente', 'PARTICULAR')}
+            />
+            Particular
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="tipo_cliente"
+              value="ASEGURADORA"
+              checked={tipoCliente === 'ASEGURADORA'}
+              onChange={() => onChange('tipo_cliente', 'ASEGURADORA')}
+            />
+            Aseguradora
+          </label>
         </div>
-        <TextField label="Observaciones" value={String(form.observaciones)} onChange={(value) => onChange('observaciones', value)} />
-      </div>
-    );
-  }
 
-  if (status === 'COMPRA_REPUESTO') {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Repuesto requerido" value={String(form.descripcion)} onChange={(value) => onChange('descripcion', value)} placeholder="Parachoques delantero" />
-          <Field label="Cantidad" type="number" value={String(form.cantidad)} onChange={(value) => onChange('cantidad', value)} />
-          <SelectField label="Estado de compra" value={String(form.estado)} onChange={(value) => onChange('estado', value)} options={['PENDIENTE', 'SOLICITADO', 'COMPRADO', 'EN_TRANSITO', 'RECIBIDO', 'CANCELADO']} />
-          <Field label="Proveedor" value={String(form.proveedor)} onChange={(value) => onChange('proveedor', value)} />
-          <Field label="Fecha estimada llegada" type="date" value={String(form.fecha_estimada_llegada)} onChange={(value) => onChange('fecha_estimada_llegada', value)} />
-          <Field label="Fecha real llegada" type="date" value={String(form.fecha_real_llegada)} onChange={(value) => onChange('fecha_real_llegada', value)} />
-          <Field label="Costo" type="number" value={String(form.costo)} onChange={(value) => onChange('costo', value)} />
-        </div>
-        <TextField label="Observaciones" value={String(form.observaciones)} onChange={(value) => onChange('observaciones', value)} />
+        {/* Pestañas */}
+        <Tabs value={activeProformaTab} onValueChange={(v) => onProformaTabChange(v as 'piezas' | 'aprobacion' | 'repuestos')}>
+          <TabsList className="w-full">
+            <TabsTrigger value="piezas" className="flex-1">
+              Piezas & Daños
+              {process.proforma.length > 0 ? <span className="ml-1 text-green-600">✓</span> : null}
+            </TabsTrigger>
+            <TabsTrigger value="aprobacion" className="flex-1">
+              Aprobación
+              {aprobada ? <span className="ml-1 text-green-600">✓</span> : <span className="ml-1 text-amber-500">⚠</span>}
+            </TabsTrigger>
+            <TabsTrigger value="repuestos" className="flex-1">
+              Repuestos
+              {repuestosListos ? <span className="ml-1 text-green-600">✓</span> : <span className="ml-1 text-amber-500">⚠</span>}
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Pestaña 1: Piezas & Daños */}
+          <TabsContent value="piezas" className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Pieza afectada" value={String(form.pieza)} onChange={(v) => onChange('pieza', v)} placeholder="Guardafango delantero" />
+              <SelectField
+                label="Categoría de daño"
+                value={String(form.categoria_dano)}
+                onChange={(v) => onChange('categoria_dano', v)}
+                options={damageCategoryOptions}
+              />
+              <Field label="Costo estimado" type="number" value={String(form.costo_estimado)} onChange={(v) => onChange('costo_estimado', v)} placeholder="0.00" />
+              <Field label="URL foto" value={String(form.foto_url_pieza)} onChange={(v) => onChange('foto_url_pieza', v)} placeholder="https://..." />
+            </div>
+            <CheckField label="Requiere reemplazo" checked={Boolean(form.requiere_reemplazo)} onChange={(v) => onChange('requiere_reemplazo', v)} />
+            <TextField label="Observación" value={String(form.observacion_pieza)} onChange={(v) => onChange('observacion_pieza', v)} />
+
+            {process.proforma.length > 0 && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="mb-2 text-xs font-medium uppercase text-gray-500">Piezas registradas ({process.proforma.length})</p>
+                <div className="space-y-1">
+                  {process.proforma.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between rounded bg-white px-3 py-2 text-sm">
+                      <span className="font-medium text-gray-900">{p.pieza}</span>
+                      <span className="text-gray-500">{p.categoria_dano} · ${p.costo_estimado}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Pestaña 2: Aprobación */}
+          <TabsContent value="aprobacion" className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <SelectField
+                label="Estado de aprobación"
+                value={String(form.estado_aprobacion)}
+                onChange={(v) => onChange('estado_aprobacion', v)}
+                options={
+                  tipoCliente === 'PARTICULAR'
+                    ? ['PENDIENTE_ENVIO', 'ENVIADO', 'APROBADO', 'RECHAZADO']
+                    : ['PENDIENTE_ENVIO', 'ENVIADO', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSERVADO']
+                }
+              />
+              <Field
+                label={tipoCliente === 'PARTICULAR' ? 'Fecha envío proforma al cliente' : 'Fecha envío a aseguradora'}
+                type="date"
+                value={String(form.fecha_envio)}
+                onChange={(v) => onChange('fecha_envio', v)}
+              />
+              <Field
+                label={tipoCliente === 'PARTICULAR' ? 'Fecha aprobación del cliente' : 'Fecha aprobación aseguradora'}
+                type="date"
+                value={String(form.fecha_aprobacion)}
+                onChange={(v) => onChange('fecha_aprobacion', v)}
+              />
+              {tipoCliente === 'ASEGURADORA' && (
+                <Field label="URL documento adjunto" value={String(form.documento_url)} onChange={(v) => onChange('documento_url', v)} placeholder="https://..." />
+              )}
+            </div>
+            <TextField label="Observaciones" value={String(form.observaciones_aprobacion)} onChange={(v) => onChange('observaciones_aprobacion', v)} />
+          </TabsContent>
+
+          {/* Pestaña 3: Repuestos */}
+          <TabsContent value="repuestos" className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Repuesto requerido" value={String(form.descripcion_repuesto)} onChange={(v) => onChange('descripcion_repuesto', v)} placeholder="Parachoques delantero" />
+              <Field label="Cantidad" type="number" value={String(form.cantidad_repuesto)} onChange={(v) => onChange('cantidad_repuesto', v)} />
+              <SelectField
+                label="Estado de compra"
+                value={String(form.estado_repuesto)}
+                onChange={(v) => onChange('estado_repuesto', v)}
+                options={['PENDIENTE', 'SOLICITADO', 'COMPRADO', 'EN_TRANSITO', 'RECIBIDO', 'CANCELADO']}
+              />
+              <Field label="Proveedor" value={String(form.proveedor)} onChange={(v) => onChange('proveedor', v)} />
+              <Field label="Fecha estimada llegada" type="date" value={String(form.fecha_estimada_llegada)} onChange={(v) => onChange('fecha_estimada_llegada', v)} />
+              <Field label="Fecha real llegada" type="date" value={String(form.fecha_real_llegada)} onChange={(v) => onChange('fecha_real_llegada', v)} />
+              <Field label="Costo" type="number" value={String(form.costo_repuesto)} onChange={(v) => onChange('costo_repuesto', v)} />
+            </div>
+            <TextField label="Observaciones" value={String(form.observaciones_repuesto)} onChange={(v) => onChange('observaciones_repuesto', v)} />
+
+            {process.repuestos.length > 0 && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="mb-2 text-xs font-medium uppercase text-gray-500">Repuestos registrados ({process.repuestos.length})</p>
+                <div className="space-y-1">
+                  {process.repuestos.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between rounded bg-white px-3 py-2 text-sm">
+                      <span className="font-medium text-gray-900">{r.descripcion}</span>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${r.estado === 'RECIBIDO' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {r.estado}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     );
   }

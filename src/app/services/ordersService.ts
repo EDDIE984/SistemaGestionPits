@@ -53,6 +53,7 @@ export async function fetchOrders(): Promise<WorkshopOrder[]> {
       id: r['id'] as string,
       numero_orden: r['numero_orden'] as string,
       estado,
+      tipo_cliente: seg !== null ? 'ASEGURADORA' : 'PARTICULAR',
       sucursal_id: r['sucursal_id'] as string,
       sucursal: suc?.nombre ?? '',
       placa: veh?.placa ?? '',
@@ -83,7 +84,7 @@ export async function createOrder(input: {
   chasis?: string;
   motor?: string;
   observaciones?: string;
-}): Promise<string> {
+}): Promise<{ id: string; numero_orden: string }> {
   const session = getSession();
   if (!session) throw new Error('Sesion no encontrada');
 
@@ -195,7 +196,7 @@ export async function createOrder(input: {
     .single();
 
   if (orderError) throw orderError;
-  return (newOrder as { id: string }).id;
+  return { id: (newOrder as { id: string }).id, numero_orden: numeroOrden };
 }
 
 export async function updateOrderStatus(

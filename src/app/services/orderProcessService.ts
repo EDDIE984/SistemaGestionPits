@@ -230,26 +230,83 @@ export async function saveOrderStep(
 
   switch (orderStatus) {
     case 'LEVANTAMIENTO_PROFORMA': {
+      // 1. Guardar última pieza (lógica existente)
       const last = process.proforma.at(-1);
-      if (!last) break;
-      if (last.id) {
-        await supabase.from('orden_piezas_danos').update({
-          pieza: last.pieza,
-          categoria_dano: last.categoria_dano,
-          observacion: last.observacion || null,
-          requiere_reemplazo: last.requiere_reemplazo,
-          costo_estimado: last.costo_estimado || null,
-        }).eq('id', last.id);
-      } else {
-        const { data } = await supabase.from('orden_piezas_danos').insert({
-          orden_id: orderId,
-          pieza: last.pieza,
-          categoria_dano: last.categoria_dano,
-          observacion: last.observacion || null,
-          requiere_reemplazo: last.requiere_reemplazo,
-          costo_estimado: last.costo_estimado || null,
-        }).select('id').single();
-        if (data) last.id = (data as { id: string }).id;
+      if (last?.pieza) {
+        if (last.id) {
+          await supabase.from('orden_piezas_danos').update({
+            pieza: last.pieza,
+            categoria_dano: last.categoria_dano,
+            observacion: last.observacion || null,
+            requiere_reemplazo: last.requiere_reemplazo,
+            costo_estimado: last.costo_estimado || null,
+          }).eq('id', last.id);
+        } else {
+          const { data } = await supabase.from('orden_piezas_danos').insert({
+            orden_id: orderId,
+            pieza: last.pieza,
+            categoria_dano: last.categoria_dano,
+            observacion: last.observacion || null,
+            requiere_reemplazo: last.requiere_reemplazo,
+            costo_estimado: last.costo_estimado || null,
+          }).select('id').single();
+          if (data) last.id = (data as { id: string }).id;
+        }
+      }
+
+      // 2. Guardar aprobación (movido desde GESTION_ASEGURADORA)
+      if (session) {
+        const a = process.aseguradora;
+        if (a.id) {
+          await supabase.from('orden_gestion_aseguradora').update({
+            aplica_aseguradora: a.aplica_aseguradora,
+            estado: a.estado,
+            fecha_envio: a.fecha_envio || null,
+            fecha_aprobacion: a.fecha_aprobacion || null,
+            observaciones: a.observaciones || null,
+          }).eq('id', a.id);
+        } else {
+          const { data } = await supabase.from('orden_gestion_aseguradora').insert({
+            orden_id: orderId,
+            usuario_id: session.id,
+            aplica_aseguradora: a.aplica_aseguradora,
+            estado: a.estado,
+            fecha_envio: a.fecha_envio || null,
+            fecha_aprobacion: a.fecha_aprobacion || null,
+            observaciones: a.observaciones || null,
+          }).select('id').single();
+          if (data) a.id = (data as { id: string }).id;
+        }
+      }
+
+      // 3. Guardar último repuesto (movido desde COMPRA_REPUESTO)
+      const lastRep = process.repuestos.at(-1);
+      if (lastRep && (lastRep.descripcion || lastRep.proveedor || lastRep.costo > 0)) {
+        if (lastRep.id) {
+          await supabase.from('orden_repuestos').update({
+            descripcion_libre: lastRep.descripcion || null,
+            cantidad: lastRep.cantidad,
+            estado: lastRep.estado,
+            proveedor: lastRep.proveedor || null,
+            fecha_estimada_llegada: lastRep.fecha_estimada_llegada || null,
+            fecha_real_llegada: lastRep.fecha_real_llegada || null,
+            costo: lastRep.costo || null,
+            observaciones: lastRep.observaciones || null,
+          }).eq('id', lastRep.id);
+        } else {
+          const { data } = await supabase.from('orden_repuestos').insert({
+            orden_id: orderId,
+            descripcion_libre: lastRep.descripcion || null,
+            cantidad: lastRep.cantidad,
+            estado: lastRep.estado,
+            proveedor: lastRep.proveedor || null,
+            fecha_estimada_llegada: lastRep.fecha_estimada_llegada || null,
+            fecha_real_llegada: lastRep.fecha_real_llegada || null,
+            costo: lastRep.costo || null,
+            observaciones: lastRep.observaciones || null,
+          }).select('id').single();
+          if (data) lastRep.id = (data as { id: string }).id;
+        }
       }
       break;
     }

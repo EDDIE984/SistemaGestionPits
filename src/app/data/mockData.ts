@@ -3,8 +3,6 @@ import type { OrderStatus } from '@/app/types';
 export const orderFlow: OrderStatus[] = [
   'INGRESADA',
   'LEVANTAMIENTO_PROFORMA',
-  'GESTION_ASEGURADORA',
-  'COMPRA_REPUESTO',
   'PLANIFICACION_REPARACION',
   'INICIO_REPARACION',
   'CONTROL_CALIDAD',

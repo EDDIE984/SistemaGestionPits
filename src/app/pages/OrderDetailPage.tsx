@@ -980,24 +980,25 @@ function SelectField({
 }
 
 function SavedDataSummary({ process }: { process: MockOrderProcess }) {
+  const aprobacion = process.aseguradora;
   return (
     <Card>
       <CardHeader>
         <CardTitle>Datos registrados</CardTitle>
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <SummaryBox title="Proforma" value={`${process.proforma.length} pieza(s)`} detail={process.proforma.at(-1)?.pieza} />
+        <SummaryBox title="Piezas" value={`${process.proforma.length} pieza(s)`} detail={process.proforma.at(-1)?.pieza} />
         <SummaryBox
-          title="Aseguradora"
-          value={process.aseguradora.estado}
+          title="Aprobación"
+          value={aprobacion.estado ?? 'PENDIENTE_ENVIO'}
           detail={[
-            process.aseguradora.fecha_envio ? `Envio: ${process.aseguradora.fecha_envio}` : '',
-            process.aseguradora.fecha_aprobacion ? `Aprobacion: ${process.aseguradora.fecha_aprobacion}` : '',
-            process.aseguradora.observaciones,
+            aprobacion.fecha_envio ? `Envío: ${aprobacion.fecha_envio}` : '',
+            aprobacion.fecha_aprobacion ? `Aprobación: ${aprobacion.fecha_aprobacion}` : '',
+            aprobacion.observaciones,
           ].filter(Boolean).join(' · ')}
         />
         <SummaryBox title="Repuestos" value={`${process.repuestos.length} repuesto(s)`} detail={process.repuestos.at(-1)?.descripcion} />
-        <SummaryBox title="Planificacion" value={`${process.tareas.length} tarea(s)`} detail={process.tareas.at(-1)?.operacion} />
+        <SummaryBox title="Planificación" value={`${process.tareas.length} tarea(s)`} detail={process.tareas.at(-1)?.operacion} />
         <SummaryBox title="Calidad" value={process.calidad.resultado} detail={process.calidad.observaciones} />
         <SummaryBox title="Entrega" value={process.entrega.confirmada ? 'Confirmada' : 'Pendiente'} detail={process.entrega.fecha_entrega_real} />
       </CardContent>
@@ -1127,6 +1128,15 @@ function historyFieldLabel(key: string) {
     tarifa_hora: 'Tarifa hora',
     fecha_inicio_planificada: 'Inicio planificado',
     fecha_fin_planificada: 'Fin planificado',
+    tipo_cliente: 'Tipo de cliente',
+    estado_aprobacion: 'Estado aprobación',
+    observaciones_aprobacion: 'Observaciones aprobación',
+    descripcion_repuesto: 'Repuesto',
+    cantidad_repuesto: 'Cantidad',
+    estado_repuesto: 'Estado repuesto',
+    costo_repuesto: 'Costo repuesto',
+    foto_url_pieza: 'Foto pieza',
+    observacion_pieza: 'Observación pieza',
   };
 
   return labels[key] ?? key.replaceAll('_', ' ');

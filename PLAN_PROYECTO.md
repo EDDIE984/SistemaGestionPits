@@ -33,6 +33,10 @@ Las credenciales y URLs externas deben configurarse mediante variables de entorn
 VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=xxxx
 
+# Backend / Serverless Functions en Vercel
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=xxxx
+
 VITE_API_CEDULA_URL=http://nessoftfact-001-site6.atempurl.com/api/ConsultasDatos/ConsultaCedulaV2
 VITE_API_CEDULA_KEY=xxxx
 
@@ -41,6 +45,8 @@ VITE_API_PLACA_TOKEN=xxxx
 ```
 
 Nota tecnica: los tokens de cedula y placa estan expuestos en el frontend. Se recomienda migrarlos a una Supabase Edge Function cuando sea posible.
+
+Nota de seguridad: `SUPABASE_SERVICE_ROLE_KEY` solo debe existir en variables de entorno de Vercel o del backend. Nunca debe exponerse con prefijo `VITE_`, ni enviarse al navegador, ni incluirse en la app Flutter.
 
 ---
 
@@ -425,6 +431,311 @@ La app movil de operarios debe reutilizar estas mismas reglas:
 - No permitir avance manual del flujo de orden desde la app movil; la transicion depende del estado real de las tareas.
 - Sincronizar historial completo para medir tiempo real, pausas y eficiencia.
 
+### 13.1 Webservices PDA / Flutter
+
+Para permitir el desarrollo de una app Flutter ejecutada desde PDA o handheld con lector de codigo de barras, se exponen servicios backend en la carpeta `api/`. Si la aplicacion esta desplegada en Vercel, cada archivo dentro de `api/` funciona como Serverless Function y queda disponible bajo el mismo dominio:
+
+```txt
+https://tu-dominio.vercel.app/api/logeo_Operaciones
+https://tu-dominio.vercel.app/api/operacion-isla
+```
+
+La documentacion HTML de consumo queda disponible en:
+
+```txt
+/webservices-pda.html
+```
+
+En ambiente Vercel se abriria como:
+
+```txt
+https://tu-dominio.vercel.app/webservices-pda.html
+```
+
+**Variables requeridas en Vercel:**
+
+```env
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=xxxx
+```
+
+Si `SUPABASE_URL` no existe, el servicio puede usar `VITE_SUPABASE_URL` como respaldo. La llave `SUPABASE_SERVICE_ROLE_KEY` se usa solo desde backend para validar credenciales y registrar operaciones en Supabase sin exponer permisos sensibles al cliente Flutter.
+
+#### Servicio 1: `logeo_Operaciones`
+
+**Endpoint:**
+
+```txt
+POST /api/logeo_Operaciones
+```
+
+**Objetivo:** validar credenciales de un usuario operativo contra la tabla `usuarios`, confirmar que su perfil sea `OPERARIO` y devolver los datos necesarios para trabajar desde el PDA: usuario, sucursal, perfil, isla y tecnico asociado.
+
+**Request:**
+
+```json
+{
+  "username": "operario1",
+  "password": "clave123"
+}
+```
+
+Tambien acepta los alias:
+
+```json
+{
+  "usuario": "operario1",
+  "clave": "clave123"
+}
+```
+
+**Respuesta exitosa:**
+
+```json
+{
+  "ok": true,
+  "usuario": {
+    "id": "uuid-usuario",
+    "nombre": "Juan Perez",
+    "username": "operario1",
+    "perfil": "OPERARIO",
+    "sucursal": {
+      "id": "uuid-sucursal",
+      "nombre": "Sucursal Norte"
+    },
+    "isla": {
+      "id": "uuid-isla",
+      "nombre": "Pintura"
+    },
+    "tecnico_id": "uuid-tecnico"
+  }
+}
+```
+
+**Reglas:**
+
+- Si las credenciales no son validas, responde `401`.
+- Si el usuario existe pero no tiene perfil `OPERARIO`, responde `403`.
+- Si el operario no tiene isla principal en `usuarios.isla_id`, se intenta resolver desde `tecnicos.isla_principal_id`.
+- La app Flutter debe guardar al menos `usuario.id`, `usuario.nombre`, `usuario.sucursal.id`, `usuario.isla.id` y `usuario.tecnico_id`.
+
+**Ejemplo cURL:**
+
+```bash
+curl -X POST "https://tu-dominio.vercel.app/api/logeo_Operaciones" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "operario1",
+    "password": "clave123"
+  }'
+```
+
+#### Servicio 2: `operacion-isla`
+
+**Endpoint:**
+
+```txt
+POST /api/operacion-isla
+```
+
+**Objetivo:** recibir desde el PDA la OT leida por codigo de barras y la accion operativa que ejecuta el operario. El servicio localiza la tarea de la isla/tecnico, valida la transicion permitida, actualiza `orden_isla_tareas`, registra bitacora en `orden_isla_tarea_eventos` y registra pausas en `orden_isla_tarea_pausas`.
+
+**Acciones soportadas:**
+
+```txt
+INICIAR
+PAUSAR
+REANUDAR
+FINALIZAR
+```
+
+Tambien puede interpretar alias como `INICIO`, `PAUSA`, `FINALIZACION`, `FIN`, `START`, `PAUSE`, `RESUME` y `END`.
+
+**Request base para iniciar:**
+
+```json
+{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "INICIAR",
+  "observacion": "Inicio desde PDA"
+}
+```
+
+**Request para pausar:**
+
+```json
+{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "PAUSAR",
+  "motivo_pausa": "Espera de repuesto"
+}
+```
+
+**Request para reanudar:**
+
+```json
+{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "REANUDAR"
+}
+```
+
+**Request para finalizar:**
+
+```json
+{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "FINALIZAR",
+  "observacion": "Trabajo terminado"
+}
+```
+
+Tambien acepta `ot` como alias de `numero_orden`. Si en una evolucion el codigo de barras contiene una tarea especifica, se puede enviar `tarea_id`:
+
+```json
+{
+  "usuario_id": "uuid-usuario",
+  "tarea_id": "uuid-tarea",
+  "accion": "INICIAR"
+}
+```
+
+**Campos del request:**
+
+| Campo | Tipo | Requerido | Detalle |
+|---|---|---|---|
+| `usuario_id` | UUID | Si | ID devuelto por `logeo_Operaciones` |
+| `numero_orden` / `ot` | Texto | Si, salvo con `tarea_id` | Numero de OT leido desde codigo de barras |
+| `accion` / `operacion` | Texto | Si | `INICIAR`, `PAUSAR`, `REANUDAR`, `FINALIZAR` |
+| `tarea_id` | UUID | No | Permite operar una tarea especifica |
+| `tecnico_id` | UUID | No | Si no se envia, se resuelve desde `usuario_id` |
+| `observacion` | Texto | No | Observacion para la bitacora |
+| `motivo_pausa` | Texto | No | Motivo guardado al pausar |
+
+**Respuesta exitosa:**
+
+```json
+{
+  "ok": true,
+  "operacion": {
+    "accion": "INICIAR",
+    "fecha_hora": "2026-06-03T15:30:00.000Z"
+  },
+  "orden": {
+    "id": "uuid-orden",
+    "numero_orden": "OT-2026-001",
+    "estado": "EN_PROCESO_ISLAS"
+  },
+  "tarea": {
+    "id": "uuid-tarea",
+    "isla_id": "uuid-isla",
+    "tecnico_id": "uuid-tecnico",
+    "operacion_nombre": "Pintura puerta delantera",
+    "estado": "EN_PROCESO",
+    "evento_id": "uuid-evento"
+  }
+}
+```
+
+**Reglas de transicion aplicadas por el servicio:**
+
+| Estado actual | Accion permitida | Estado resultante |
+|---|---|---|
+| `PENDIENTE` | `INICIAR` | `EN_PROCESO` |
+| `EN_PROCESO` | `PAUSAR` | `PAUSADA` |
+| `PAUSADA` | `REANUDAR` | `EN_PROCESO` |
+| `PAUSADA` | `INICIAR` | `EN_PROCESO` y se registra como `REANUDAR` |
+| `EN_PROCESO` | `FINALIZAR` | `COMPLETADA` |
+| `COMPLETADA` | ninguna | no permite mas cambios |
+
+**Efectos en base de datos:**
+
+- Actualiza `orden_isla_tareas.estado`.
+- En `INICIAR`, si `fecha_inicio_real` esta vacia, registra la fecha/hora actual.
+- En `FINALIZAR`, registra `fecha_fin_real`.
+- Inserta cada accion en `orden_isla_tarea_eventos`.
+- En `PAUSAR`, inserta una fila en `orden_isla_tarea_pausas` con `inicio_pausa`.
+- En `REANUDAR`, cierra la pausa activa registrando `fin_pausa`.
+- En `INICIAR` o `REANUDAR`, cambia la orden a `EN_PROCESO_ISLAS`.
+- En `FINALIZAR`, si todas las tareas de la OT quedan `COMPLETADA`, cambia la orden a `CONTROL_CALIDAD`.
+
+**Validaciones de seguridad operativa:**
+
+- El usuario debe existir, estar activo y tener perfil `OPERARIO`.
+- La OT debe pertenecer a la misma sucursal del operario.
+- La tarea debe pertenecer a la isla o tecnico del operario.
+- No se permite operar una tarea completada.
+- No se permite pausar una tarea que no esta en proceso.
+- No se permite finalizar una tarea que no esta en proceso.
+
+**Ejemplo cURL:**
+
+```bash
+curl -X POST "https://tu-dominio.vercel.app/api/operacion-isla" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usuario_id": "uuid-usuario",
+    "numero_orden": "OT-2026-001",
+    "accion": "INICIAR"
+  }'
+```
+
+#### Codigos de error esperados
+
+| Codigo | Uso | Ejemplo de mensaje |
+|---|---|---|
+| `400` | Faltan campos o accion invalida | `usuario_id es requerido` |
+| `401` | Credenciales invalidas o usuario inactivo | `Credenciales invalidas` |
+| `403` | Usuario no autorizado, perfil incorrecto, otra sucursal o tarea no asignada | `La OT no pertenece a la sucursal del operario` |
+| `404` | No se encontro OT o tarea | `OT no encontrada` |
+| `409` | Transicion de estado no permitida | `Solo se puede pausar una tarea en proceso` |
+| `500` | Error interno o variables faltantes | `Falta configurar SUPABASE_SERVICE_ROLE_KEY` |
+
+#### Flujo recomendado para la app Flutter/PDA
+
+1. Mostrar login de operario.
+2. Consumir `POST /api/logeo_Operaciones`.
+3. Guardar localmente los datos devueltos del operario.
+4. Abrir pantalla principal de operacion.
+5. Mantener el `TextField` de OT con autofocus para que el lector PDA escriba el codigo y envie ENTER.
+6. Al leer el codigo, guardar `numero_orden` en estado.
+7. Mostrar botones grandes: `INICIAR`, `PAUSAR`, `REANUDAR`, `FINALIZAR`.
+8. Al presionar una accion, consumir `POST /api/operacion-isla`.
+9. Mostrar respuesta: estado de OT, estado de tarea, accion registrada y hora.
+10. Manejar errores HTTP con mensajes claros para el operario.
+11. No consumir Supabase directamente desde Flutter; toda operacion debe pasar por estos webservices.
+
+**Prompt base para generar la app Flutter:**
+
+```txt
+Crear una app Flutter para PDA/handheld de operaciones de taller PITS.
+
+La app debe permitir login de operario, lectura de OT por codigo de barras
+y registro de acciones de isla: INICIAR, PAUSAR, REANUDAR y FINALIZAR.
+
+Backend:
+Base URL: https://tu-dominio.vercel.app
+POST /api/logeo_Operaciones
+POST /api/operacion-isla
+
+Requerimientos:
+- Crear arquitectura con models, services, screens, widgets y storage.
+- Consumir HTTP con paquete http.
+- Pantalla Login con usuario, clave, loading y errores.
+- Guardar sesion local con SharedPreferences o flutter_secure_storage.
+- Pantalla PDA con nombre de operario, sucursal, isla, campo de OT con autofocus y botones grandes.
+- El lector de codigo de barras escribira la OT en el campo de texto y enviara ENTER.
+- Enviar usuario_id, numero_orden y accion al endpoint de operacion.
+- Mostrar estado resultante de OT/tarea y mensajes de exito/error.
+- Incluir cierre de sesion.
+- No usar Supabase directo desde Flutter.
+- Entregar codigo archivo por archivo y asegurar que compile.
+```
+
 ### 14. Control de Calidad
 
 Una vez que todas las islas completan su trabajo, la orden pasa a `CONTROL_CALIDAD`.
@@ -668,6 +979,8 @@ usuario_id, fecha_hora, observacion
 /reportes/operaciones-ajustadas
 
 /notificaciones
+
+/webservices-pda.html
 ```
 
 ---
@@ -750,6 +1063,8 @@ No se debe construir una landing page. La primera vista despues del login debe s
 - Reasignacion de tecnico
 - Semaforo de tiempos
 - Base funcional para app movil de operarios usando las mismas reglas de estado y bitacora
+- Webservices PDA para login operativo y registro de acciones desde Flutter
+- Pagina HTML de documentacion de consumo en `public/webservices-pda.html`
 
 ### Fase 7. Control de Calidad y Entrega
 

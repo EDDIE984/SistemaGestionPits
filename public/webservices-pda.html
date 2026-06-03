@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Webservices PDA Operaciones — PITS</title>
+  <meta
+    name="description"
+    content="Documentacion de consumo para los servicios PDA de login de operaciones y registro de operacion de isla en PITS."
+  />
+  <style>
+    :root {
+      --bg: #f6f8f7;
+      --surface: #ffffff;
+      --surface-strong: #10201d;
+      --text: #14211f;
+      --muted: #66736f;
+      --line: #dce4e1;
+      --accent: #2f9f94;
+      --accent-strong: #0f766e;
+      --warn: #a15c08;
+      --code: #0d1715;
+      --code-text: #d7f5ef;
+      --soft: #e7f4f2;
+      --radius: 8px;
+      --shadow: 0 18px 44px rgba(16, 32, 29, 0.11);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.58;
+    }
+
+    a {
+      color: var(--accent-strong);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      min-height: 100dvh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100dvh;
+      padding: 28px 24px;
+      background: var(--surface-strong);
+      color: white;
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 34px;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 8px;
+      background: rgba(47, 159, 148, 0.22);
+      font-weight: 800;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 14px;
+      line-height: 1.15;
+    }
+
+    .brand span {
+      color: rgba(255, 255, 255, 0.64);
+      font-size: 12px;
+    }
+
+    nav a {
+      display: block;
+      padding: 10px 0;
+      color: rgba(255, 255, 255, 0.72);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 14px;
+    }
+
+    nav a:hover {
+      color: white;
+    }
+
+    main {
+      width: min(1120px, 100%);
+      padding: clamp(26px, 5vw, 64px);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+      gap: clamp(22px, 4vw, 54px);
+      align-items: end;
+      padding-bottom: 38px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 820px;
+      margin: 0;
+      font-size: clamp(2.35rem, 6vw, 5.4rem);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+    }
+
+    .hero p {
+      max-width: 66ch;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .status-box {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .status-box h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .status-box p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    section {
+      padding: 34px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: clamp(1.45rem, 3vw, 2.35rem);
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      margin: 28px 0 10px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      max-width: 72ch;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .panel {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .panel h3 {
+      margin-top: 0;
+    }
+
+    .endpoint {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      max-width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .method {
+      padding: 3px 7px;
+      border-radius: 5px;
+      background: var(--accent);
+      color: white;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf3f1;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    pre {
+      margin: 14px 0 24px;
+      padding: 18px;
+      border-radius: var(--radius);
+      background: var(--code);
+      color: var(--code-text);
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #e7eeeb;
+      color: #132320;
+      font-size: 0.92em;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      padding: 14px 16px;
+      background: var(--soft);
+      color: #24413d;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+      background: #fff5e8;
+      color: #5d3a09;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .flow div {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    footer {
+      padding: 28px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 880px) {
+      .shell {
+        display: block;
+      }
+
+      aside {
+        position: relative;
+        height: auto;
+      }
+
+      main {
+        padding: 28px 18px;
+      }
+
+      .hero,
+      .grid,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: clamp(2.4rem, 14vw, 4.4rem);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <div class="mark">P</div>
+        <div>
+          <strong>PITS Operaciones</strong>
+          <span>Guia PDA / Flutter</span>
+        </div>
+      </div>
+      <nav aria-label="Contenido">
+        <a href="#vercel">Funcionamiento en Vercel</a>
+        <a href="#login">1. Login operaciones</a>
+        <a href="#operacion">2. Operacion de isla</a>
+        <a href="#flujo">Flujo recomendado</a>
+        <a href="#errores">Errores HTTP</a>
+        <a href="#flutter">Ejemplo Flutter</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Webservices PDA</p>
+          <h1>Consumo de servicios para operarios de isla</h1>
+          <p>
+            Esta pagina documenta los endpoints creados para autenticar operarios y registrar
+            inicio, pausa, reanudacion y finalizacion de trabajos desde una app Flutter ejecutada
+            en PDA con lector de codigo de barras.
+          </p>
+        </div>
+        <div class="status-box">
+          <h2>Base URL en Vercel</h2>
+          <p>Reemplaza el dominio por el de tu despliegue.</p>
+          <div class="pill-list">
+            <span class="pill">POST /api/logeo_Operaciones</span>
+            <span class="pill">POST /api/operacion-isla</span>
+          </div>
+        </div>
+      </header>
+
+      <section id="vercel">
+        <h2>Funcionamiento en Vercel</h2>
+        <p>
+          Si la app esta desplegada en Vercel, los archivos dentro de <code>api/</code> se ejecutan
+          como Serverless Functions. Por eso los servicios quedan disponibles bajo el mismo dominio
+          de la aplicacion:
+        </p>
+        <pre><code>https://tu-dominio.vercel.app/api/logeo_Operaciones
+https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
+        <div class="note">
+          Variables requeridas en Vercel: <code>SUPABASE_SERVICE_ROLE_KEY</code> y
+          <code>SUPABASE_URL</code>. Si no existe <code>SUPABASE_URL</code>, el servicio usa
+          <code>VITE_SUPABASE_URL</code> como respaldo.
+        </div>
+        <div class="note warning">
+          <strong>Importante:</strong> la llave <code>SUPABASE_SERVICE_ROLE_KEY</code> nunca debe
+          enviarse al frontend ni a Flutter. Solo vive en Environment Variables de Vercel.
+        </div>
+      </section>
+
+      <section id="login">
+        <h2>1. Login operaciones</h2>
+        <p class="endpoint"><span class="method">POST</span> /api/logeo_Operaciones</p>
+        <p>
+          Valida las credenciales contra la funcion <code>validate_credentials</code>, confirma que
+          el usuario tenga perfil <code>OPERARIO</code> y devuelve sucursal, perfil, isla y
+          <code>tecnico_id</code>.
+        </p>
+
+        <h3>Request</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Campo</th>
+              <th>Tipo</th>
+              <th>Requerido</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>username</code> o <code>usuario</code></td>
+              <td>string</td>
+              <td>Si</td>
+              <td>Usuario del operario.</td>
+            </tr>
+            <tr>
+              <td><code>password</code> o <code>clave</code></td>
+              <td>string</td>
+              <td>Si</td>
+              <td>Clave del operario.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <pre><code>{
+  "username": "operario1",
+  "password": "clave123"
+}</code></pre>
+
+        <h3>Respuesta exitosa</h3>
+        <pre><code>{
+  "ok": true,
+  "usuario": {
+    "id": "uuid-usuario",
+    "nombre": "Juan Perez",
+    "username": "operario1",
+    "perfil": "OPERARIO",
+    "sucursal": {
+      "id": "uuid-sucursal",
+      "nombre": "Sucursal Norte"
+    },
+    "isla": {
+      "id": "uuid-isla",
+      "nombre": "Pintura"
+    },
+    "tecnico_id": "uuid-tecnico"
+  }
+}</code></pre>
+
+        <h3>cURL</h3>
+        <pre><code>curl -X POST "https://tu-dominio.vercel.app/api/logeo_Operaciones" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "operario1",
+    "password": "clave123"
+  }'</code></pre>
+      </section>
+
+      <section id="operacion">
+        <h2>2. Operacion de isla</h2>
+        <p class="endpoint"><span class="method">POST</span> /api/operacion-isla</p>
+        <p>
+          Registra la operacion enviada desde el PDA. Actualiza la tarea en
+          <code>orden_isla_tareas</code>, inserta bitacora en
+          <code>orden_isla_tarea_eventos</code> y registra pausas en
+          <code>orden_isla_tarea_pausas</code>.
+        </p>
+
+        <h3>Acciones soportadas</h3>
+        <div class="flow">
+          <div>INICIAR</div>
+          <div>PAUSAR</div>
+          <div>REANUDAR</div>
+          <div>FINALIZAR</div>
+        </div>
+
+        <h3>Request</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Campo</th>
+              <th>Tipo</th>
+              <th>Requerido</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>usuario_id</code></td>
+              <td>uuid</td>
+              <td>Si</td>
+              <td>ID devuelto por el login.</td>
+            </tr>
+            <tr>
+              <td><code>numero_orden</code> o <code>ot</code></td>
+              <td>string</td>
+              <td>Si, salvo que envies <code>tarea_id</code></td>
+              <td>Numero de OT leido desde codigo de barras, por ejemplo <code>OT-2026-001</code>.</td>
+            </tr>
+            <tr>
+              <td><code>accion</code> o <code>operacion</code></td>
+              <td>string</td>
+              <td>Si</td>
+              <td><code>INICIAR</code>, <code>PAUSAR</code>, <code>REANUDAR</code> o <code>FINALIZAR</code>.</td>
+            </tr>
+            <tr>
+              <td><code>tarea_id</code></td>
+              <td>uuid</td>
+              <td>No</td>
+              <td>Util si el codigo de barras identifica una tarea especifica.</td>
+            </tr>
+            <tr>
+              <td><code>tecnico_id</code></td>
+              <td>uuid</td>
+              <td>No</td>
+              <td>Se puede omitir; el servicio lo busca por el <code>usuario_id</code>.</td>
+            </tr>
+            <tr>
+              <td><code>observacion</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>Texto libre para la bitacora del evento.</td>
+            </tr>
+            <tr>
+              <td><code>motivo_pausa</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>Motivo guardado cuando la accion es <code>PAUSAR</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Iniciar trabajo</h3>
+        <pre><code>{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "INICIAR",
+  "observacion": "Inicio desde PDA"
+}</code></pre>
+
+        <h3>Pausar trabajo</h3>
+        <pre><code>{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "PAUSAR",
+  "motivo_pausa": "Espera de repuesto"
+}</code></pre>
+
+        <h3>Reanudar trabajo</h3>
+        <pre><code>{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "REANUDAR"
+}</code></pre>
+
+        <h3>Finalizar trabajo</h3>
+        <pre><code>{
+  "usuario_id": "uuid-usuario",
+  "numero_orden": "OT-2026-001",
+  "accion": "FINALIZAR",
+  "observacion": "Trabajo terminado"
+}</code></pre>
+
+        <h3>Respuesta exitosa</h3>
+        <pre><code>{
+  "ok": true,
+  "operacion": {
+    "accion": "INICIAR",
+    "fecha_hora": "2026-06-03T15:30:00.000Z"
+  },
+  "orden": {
+    "id": "uuid-orden",
+    "numero_orden": "OT-2026-001",
+    "estado": "EN_PROCESO_ISLAS"
+  },
+  "tarea": {
+    "id": "uuid-tarea",
+    "isla_id": "uuid-isla",
+    "tecnico_id": "uuid-tecnico",
+    "operacion_nombre": "Pintura puerta delantera",
+    "estado": "EN_PROCESO",
+    "evento_id": "uuid-evento"
+  }
+}</code></pre>
+
+        <h3>cURL</h3>
+        <pre><code>curl -X POST "https://tu-dominio.vercel.app/api/operacion-isla" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usuario_id": "uuid-usuario",
+    "numero_orden": "OT-2026-001",
+    "accion": "INICIAR"
+  }'</code></pre>
+      </section>
+
+      <section id="flujo">
+        <h2>Flujo recomendado para Flutter</h2>
+        <div class="grid">
+          <div class="panel">
+            <h3>1. Login</h3>
+            <p>
+              La app llama a <code>/api/logeo_Operaciones</code>. Guarda en memoria local segura el
+              <code>usuario.id</code>, <code>tecnico_id</code>, <code>sucursal.id</code> e
+              <code>isla.id</code>.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>2. Lectura de codigo</h3>
+            <p>
+              El PDA lee el codigo de barras de la OT. Si el codigo solo trae numero de OT, envia
+              <code>numero_orden</code>. Si trae tarea, envia <code>tarea_id</code>.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>3. Accion operativa</h3>
+            <p>
+              Segun el boton del operario, envia <code>INICIAR</code>, <code>PAUSAR</code>,
+              <code>REANUDAR</code> o <code>FINALIZAR</code>.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>4. Actualizar pantalla</h3>
+            <p>
+              Usa la respuesta para mostrar estado de tarea, estado de OT y hora del evento.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="errores">
+        <h2>Errores HTTP</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Codigo</th>
+              <th>Significado</th>
+              <th>Ejemplo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>400</code></td>
+              <td>Faltan campos o accion invalida.</td>
+              <td><code>usuario_id es requerido</code></td>
+            </tr>
+            <tr>
+              <td><code>401</code></td>
+              <td>Credenciales invalidas o usuario inactivo.</td>
+              <td><code>Credenciales invalidas</code></td>
+            </tr>
+            <tr>
+              <td><code>403</code></td>
+              <td>Usuario no operario, otra sucursal o tarea no asignada.</td>
+              <td><code>La OT no pertenece a la sucursal del operario</code></td>
+            </tr>
+            <tr>
+              <td><code>404</code></td>
+              <td>No se encontro OT o tarea.</td>
+              <td><code>OT no encontrada</code></td>
+            </tr>
+            <tr>
+              <td><code>409</code></td>
+              <td>Transicion no permitida por estado actual.</td>
+              <td><code>Solo se puede pausar una tarea en proceso</code></td>
+            </tr>
+            <tr>
+              <td><code>500</code></td>
+              <td>Error interno o configuracion faltante.</td>
+              <td><code>Falta configurar SUPABASE_SERVICE_ROLE_KEY</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="flutter">
+        <h2>Ejemplo Flutter</h2>
+        <pre><code>import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+const baseUrl = 'https://tu-dominio.vercel.app';
+
+Future&lt;Map&lt;String, dynamic&gt;&gt; loginOperaciones(
+  String username,
+  String password,
+) async {
+  final res = await http.post(
+    Uri.parse('$baseUrl/api/logeo_Operaciones'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'username': username,
+      'password': password,
+    }),
+  );
+
+  final data = jsonDecode(res.body) as Map&lt;String, dynamic&gt;;
+  if (res.statusCode != 200 || data['ok'] != true) {
+    throw Exception(data['error'] ?? 'Error de login');
+  }
+  return data;
+}
+
+Future&lt;Map&lt;String, dynamic&gt;&gt; registrarOperacion({
+  required String usuarioId,
+  required String numeroOrden,
+  required String accion,
+  String? observacion,
+}) async {
+  final res = await http.post(
+    Uri.parse('$baseUrl/api/operacion-isla'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'usuario_id': usuarioId,
+      'numero_orden': numeroOrden,
+      'accion': accion,
+      if (observacion != null) 'observacion': observacion,
+    }),
+  );
+
+  final data = jsonDecode(res.body) as Map&lt;String, dynamic&gt;;
+  if (res.statusCode != 200 || data['ok'] != true) {
+    throw Exception(data['error'] ?? 'Error registrando operacion');
+  }
+  return data;
+}</code></pre>
+      </section>
+
+      <footer>
+        Documento generado para el consumo de servicios PDA de PITS. Ultima revision: 2026-06-03.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

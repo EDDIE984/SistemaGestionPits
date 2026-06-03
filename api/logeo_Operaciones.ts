@@ -41,7 +41,7 @@ export default async function handler(request: any, response: any) {
       return;
     }
 
-    const supabase = createSupabaseAdmin();
+    const supabase = await createSupabaseAdmin();
     const { data, error } = await supabase.rpc('validate_credentials', {
       p_username: username,
       p_password: password,

@@ -87,7 +87,7 @@ function validateTransition(current: TaskRow, action: IslandAction) {
 }
 
 async function updateOrderStatus(
-  supabase: ReturnType<typeof createSupabaseAdmin>,
+  supabase: any,
   order: OrderRow,
   usuarioId: string,
   nextStatus: OrderStatus,
@@ -116,7 +116,7 @@ async function updateOrderStatus(
 }
 
 async function findTask(
-  supabase: ReturnType<typeof createSupabaseAdmin>,
+  supabase: any,
   input: {
     orderId?: string;
     tareaId?: string;
@@ -180,7 +180,7 @@ export default async function handler(request: any, response: any) {
       return;
     }
 
-    const supabase = createSupabaseAdmin();
+    const supabase = await createSupabaseAdmin();
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
       .select('id, nombre, sucursal_id, isla_id, roles(nombre)')

@@ -370,7 +370,35 @@ Funciones:
 - Registrar observaciones
 - Marcar novedad o atraso
 
-**Calculo de tiempo real:** se descuentan los periodos de pausa del tiempo total transcurrido.
+**Regla de control operativo:**
+
+- El estado `INICIO_REPARACION` no se avanza manualmente desde el detalle de la orden.
+- Las acciones operativas se ejecutan exclusivamente desde la pantalla de isla.
+- Al ejecutar `INICIAR` por primera vez, se registra `fecha_inicio_real` y la orden cambia automaticamente a `EN_PROCESO_ISLAS`.
+- Si una tarea esta `PAUSADA`, la accion `INICIAR` se interpreta como `REANUDAR` y queda registrada como evento independiente.
+- `FINALIZAR` solo se permite cuando la tarea esta `EN_PROCESO`; no se debe finalizar una tarea que nunca inicio.
+- Al finalizar una tarea se registra `fecha_fin_real`.
+- Cuando todas las tareas/islas planificadas de la orden estan `COMPLETADA`, la orden cambia automaticamente a `CONTROL_CALIDAD`.
+- El detalle de la orden solo muestra el resumen operativo de islas, fechas planificadas, fechas reales y avance temporal; no muestra botones de guardar o avanzar durante `INICIO_REPARACION` ni `EN_PROCESO_ISLAS`.
+
+**Historial operativo obligatorio:**
+
+Cada accion del tecnico debe guardarse en `orden_isla_tarea_eventos`:
+
+- `INICIAR`
+- `PAUSAR`
+- `REANUDAR`
+- `FINALIZAR`
+
+La bitacora debe conservar todos los ciclos de trabajo, por ejemplo:
+
+```txt
+INICIAR -> PAUSAR -> REANUDAR -> PAUSAR -> REANUDAR -> FINALIZAR
+```
+
+Esto permite medir el tiempo real efectivo y auditar cada interrupcion.
+
+**Calculo de tiempo real:** se descuenta cada periodo pausado del tiempo total entre `fecha_inicio_real` y `fecha_fin_real`. Si la tarea aun no finaliza, el tiempo real parcial se calcula hasta la hora actual descontando pausas cerradas y, si hay una pausa activa, deteniendo el conteo en el inicio de esa pausa.
 
 Colores de estado:
 
@@ -378,6 +406,24 @@ Colores de estado:
 - Amarillo: menos del 20% del tiempo planificado restante
 - Rojo: atrasado (hora actual supera la hora fin planificada)
 - Azul: proximo vehiculo (aun no iniciado)
+
+**Base para futura app movil:**
+
+La app movil de operarios debe reutilizar estas mismas reglas:
+
+- Listar tareas asignadas por isla/tecnico y sucursal.
+- Mostrar OT, placa, vehiculo, operacion, tecnico, inicio/fin planificado, estado actual y semaforo.
+- Permitir solo acciones validas segun estado:
+  - `PENDIENTE` -> `INICIAR`
+  - `EN_PROCESO` -> `PAUSAR` o `FINALIZAR`
+  - `PAUSADA` -> `REANUDAR`
+  - `COMPLETADA` -> sin acciones operativas
+- Registrar cada accion en `orden_isla_tarea_eventos`.
+- Actualizar `orden_isla_tareas.estado`, `fecha_inicio_real` y `fecha_fin_real` segun corresponda.
+- Cambiar la orden a `EN_PROCESO_ISLAS` al primer inicio/reanudacion operativo.
+- Cambiar la orden a `CONTROL_CALIDAD` cuando todas las tareas planificadas esten completadas.
+- No permitir avance manual del flujo de orden desde la app movil; la transicion depende del estado real de las tareas.
+- Sincronizar historial completo para medir tiempo real, pausas y eficiencia.
 
 ### 14. Control de Calidad
 
@@ -560,7 +606,7 @@ id, tarea_id, usuario_id, accion,
 estado_resultante, fecha_hora, observacion
 ```
 
-Registra cada inicio, pausa, reanudacion y finalizacion de la tarea. Esta bitacora permite auditar la operacion real del taller y reconstruir tiempos si se requiere.
+Registra cada inicio, pausa, reanudacion y finalizacion de la tarea. Esta bitacora permite auditar la operacion real del taller y reconstruir tiempos si se requiere. Para la futura app movil, esta tabla sera la fuente de verdad del historial operativo y debe conservar todos los ciclos de pausa/reanudacion hasta la finalizacion.
 
 **`orden_isla_tarea_reasignaciones`**
 ```
@@ -703,6 +749,7 @@ No se debe construir una landing page. La primera vista despues del login debe s
 - Calculo de tiempo real y eficiencia
 - Reasignacion de tecnico
 - Semaforo de tiempos
+- Base funcional para app movil de operarios usando las mismas reglas de estado y bitacora
 
 ### Fase 7. Control de Calidad y Entrega
 

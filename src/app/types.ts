@@ -172,3 +172,13 @@ export interface OrderProcess {
     datos?: unknown;
   }>;
 }
+
+export interface OrderPhotoAttachment {
+  id: string;
+  url: string;
+  storage_path: string;
+  etapa: 'PROFORMA' | 'CALIDAD' | 'ENTREGA' | 'GENERAL';
+  nombre: string;
+  pieza?: string;
+  created_at: string;
+}

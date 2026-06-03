@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { AlertCircle, Bell, CheckCheck, ExternalLink, Inbox, RefreshCw } from 'lucide-react';
+import { AlertCircle, Bell, CheckCheck, Clock, ExternalLink, Inbox, Package, RefreshCw, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/app/auth/AuthContext';
 import { PageHeader } from '@/app/components/PageHeader';
@@ -23,6 +23,39 @@ function notificationTypeLabel(type: string) {
     .replace(/_/g, ' ')
     .toLowerCase()
     .replace(/\b\w/g, (value) => value.toUpperCase());
+}
+
+function getNotificationVisuals(tipo: string) {
+  switch (tipo) {
+    case 'TAREA_ATRASADA':
+      return {
+        badgeClass: 'border-orange-200 bg-orange-50 text-orange-700',
+        cardClass: 'border-orange-200 bg-orange-50/60 shadow-sm',
+        Icon: Clock,
+        label: 'Tarea atrasada',
+      };
+    case 'APROBACION_ATASCADA':
+      return {
+        badgeClass: 'border-amber-200 bg-amber-50 text-amber-700',
+        cardClass: 'border-amber-200 bg-amber-50/60 shadow-sm',
+        Icon: ShieldAlert,
+        label: 'Aprobación detenida',
+      };
+    case 'REPUESTO_PENDIENTE':
+      return {
+        badgeClass: 'border-purple-200 bg-purple-50 text-purple-700',
+        cardClass: 'border-purple-200 bg-purple-50/60 shadow-sm',
+        Icon: Package,
+        label: 'Repuesto pendiente',
+      };
+    default:
+      return {
+        badgeClass: 'border-blue-200 bg-white text-blue-700',
+        cardClass: 'border-blue-200 bg-blue-50/60 shadow-sm',
+        Icon: Bell,
+        label: notificationTypeLabel(tipo),
+      };
+  }
 }
 
 export function NotificationsPage() {
@@ -159,19 +192,23 @@ export function NotificationsPage() {
               key={notification.id}
               className={notification.leida
                 ? 'border-gray-200 bg-white'
-                : 'border-blue-200 bg-blue-50/60 shadow-sm'}
+                : getNotificationVisuals(notification.tipo).cardClass}
             >
               <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <Badge
-                      className={notification.leida
-                        ? 'border-gray-200 bg-gray-50 text-gray-600'
-                        : 'border-blue-200 bg-white text-blue-700'}
-                      variant="outline"
-                    >
-                      {notificationTypeLabel(notification.tipo)}
-                    </Badge>
+                    {(() => {
+                      const { badgeClass, Icon, label } = getNotificationVisuals(notification.tipo);
+                      return (
+                        <Badge
+                          className={notification.leida ? 'border-gray-200 bg-gray-50 text-gray-600' : badgeClass}
+                          variant="outline"
+                        >
+                          <Icon className="mr-1 h-3 w-3" />
+                          {label}
+                        </Badge>
+                      );
+                    })()}
                     {!notification.leida ? (
                       <Badge className="bg-blue-600 text-white">Nueva</Badge>
                     ) : null}

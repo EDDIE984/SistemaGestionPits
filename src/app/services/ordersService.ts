@@ -1,4 +1,5 @@
 import { supabase } from '@/app/lib/supabase';
+import { deleteOrderPhotos } from '@/app/services/orderPhotosService';
 import type { OrderStatus, SessionUser, WorkshopOrder } from '@/app/types';
 
 function getSession(): SessionUser | null {
@@ -235,4 +236,6 @@ export async function deleteOrder(orderId: string): Promise<void> {
     .eq('estado', 'LEVANTAMIENTO_PROFORMA');
 
   if (error) throw error;
+
+  await deleteOrderPhotos(orderId);
 }

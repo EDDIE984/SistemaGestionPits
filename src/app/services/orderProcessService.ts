@@ -61,6 +61,201 @@ async function findIslandIdByName(name: string, sucursalId: string) {
   return match ? (match as { id: string }).id : null;
 }
 
+type PieceDamageData = OrderProcess['proforma'][number];
+type PieceDamageRow = PieceDamageData & { created_at?: string };
+type ApprovalData = OrderProcess['aseguradora'];
+type ApprovalRow = ApprovalData & { created_at?: string };
+type PartData = OrderProcess['repuestos'][number];
+type PartRow = PartData & { created_at?: string };
+export type ProformaSection = 'piezas' | 'aprobacion' | 'repuestos';
+
+async function findExistingPieceDamage(orderId: string, pieceName: string) {
+  const { data, error } = await supabase
+    .from('orden_piezas_danos')
+    .select('id, pieza, categoria_dano, observacion, requiere_reemplazo, costo_estimado, created_at')
+    .eq('orden_id', orderId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+
+  const normalizedPieceName = normalizeText(pieceName);
+  const matches = ((data ?? []) as PieceDamageRow[]).filter((row) => normalizeText(row.pieza) === normalizedPieceName);
+  return {
+    primary: matches[0] ?? null,
+    duplicates: matches.slice(1),
+  };
+}
+
+async function savePieceDamage(orderId: string, piece: PieceDamageData) {
+  const payload = {
+    pieza: piece.pieza,
+    categoria_dano: piece.categoria_dano,
+    observacion: piece.observacion || null,
+    requiere_reemplazo: piece.requiere_reemplazo,
+    costo_estimado: piece.costo_estimado || null,
+  };
+
+  if (piece.id) {
+    await supabase.from('orden_piezas_danos').update(payload).eq('id', piece.id);
+    const existing = await findExistingPieceDamage(orderId, piece.pieza);
+    const duplicateIds = [existing.primary, ...existing.duplicates]
+      .filter((row): row is PieceDamageRow => Boolean(row) && row.id !== piece.id)
+      .map((row) => row.id);
+    if (duplicateIds.length > 0) {
+      await supabase.from('orden_piezas_danos').delete().in('id', duplicateIds);
+    }
+    return;
+  }
+
+  const existing = await findExistingPieceDamage(orderId, piece.pieza);
+
+  if (existing.primary) {
+    await supabase.from('orden_piezas_danos').update(payload).eq('id', existing.primary.id);
+    piece.id = existing.primary.id;
+
+    const duplicateIds = existing.duplicates.map((row) => row.id);
+    if (duplicateIds.length > 0) {
+      await supabase.from('orden_piezas_danos').delete().in('id', duplicateIds);
+    }
+    return;
+  }
+
+  const { data } = await supabase.from('orden_piezas_danos').insert({
+    orden_id: orderId,
+    ...payload,
+  }).select('id').single();
+
+  if (data) piece.id = (data as { id: string }).id;
+}
+
+function uniquePieceDamageRows(rows: PieceDamageRow[]) {
+  const byPiece = new Map<string, PieceDamageRow>();
+
+  for (const row of rows) {
+    byPiece.set(normalizeText(row.pieza), row);
+  }
+
+  return Array.from(byPiece.values());
+}
+
+async function findExistingApprovalRows(orderId: string, estado?: string) {
+  let query = supabase
+    .from('orden_gestion_aseguradora')
+    .select('id, aplica_aseguradora, estado, fecha_envio, fecha_aprobacion, observaciones, created_at')
+    .eq('orden_id', orderId)
+    .order('created_at', { ascending: false });
+
+  if (estado) {
+    query = query.eq('estado', estado);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return (data ?? []) as ApprovalRow[];
+}
+
+async function saveApproval(orderId: string, approval: ApprovalData, session: SessionUser) {
+  const payload = {
+    aplica_aseguradora: approval.aplica_aseguradora,
+    estado: approval.estado,
+    fecha_envio: approval.fecha_envio || null,
+    fecha_aprobacion: approval.fecha_aprobacion || null,
+    observaciones: approval.observaciones || null,
+  };
+
+  const sameStateRows = await findExistingApprovalRows(orderId, approval.estado);
+  if (sameStateRows.length > 0) {
+    throw new Error(`El estado de aprobación "${approval.estado}" ya existe para esta OT.`);
+  }
+
+  const { data } = await supabase.from('orden_gestion_aseguradora').insert({
+    orden_id: orderId,
+    usuario_id: session.id,
+    ...payload,
+  }).select('id').single();
+
+  if (data) approval.id = (data as { id: string }).id;
+}
+
+async function findExistingPartRows(orderId: string, estado?: string) {
+  let query = supabase
+    .from('orden_repuestos')
+    .select('id, descripcion_libre, cantidad, estado, proveedor, fecha_estimada_llegada, fecha_real_llegada, costo, observaciones, created_at')
+    .eq('orden_id', orderId)
+    .order('created_at', { ascending: false });
+
+  if (estado) {
+    query = query.eq('estado', estado);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return (data ?? []) as PartRow[];
+}
+
+async function savePart(orderId: string, part: PartData) {
+  const sameStateRows = await findExistingPartRows(orderId, part.estado);
+  if (sameStateRows.length > 0) {
+    throw new Error(`El estado de repuesto "${part.estado}" ya existe para esta OT.`);
+  }
+
+  const { data } = await supabase.from('orden_repuestos').insert({
+    orden_id: orderId,
+    descripcion_libre: part.descripcion || null,
+    cantidad: part.cantidad,
+    estado: part.estado,
+    proveedor: part.proveedor || null,
+    fecha_estimada_llegada: part.fecha_estimada_llegada || null,
+    fecha_real_llegada: part.fecha_real_llegada || null,
+    costo: part.costo || null,
+    observaciones: part.observaciones || null,
+  }).select('id').single();
+
+  if (data) part.id = (data as { id: string }).id;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function hasDuplicateSectionHistory(
+  orderId: string,
+  history: OrderProcess['historial'][number],
+  orderStatus: OrderStatus,
+) {
+  if (orderStatus !== 'LEVANTAMIENTO_PROFORMA' || !isRecord(history.datos)) {
+    return false;
+  }
+
+  const data = history.datos;
+  const duplicateFilters: Array<Record<string, unknown>> = [];
+
+  if (data.estado_aprobacion) {
+    duplicateFilters.push({ estado_aprobacion: data.estado_aprobacion });
+  }
+
+  if (data.estado_repuesto) {
+    duplicateFilters.push({ estado_repuesto: data.estado_repuesto });
+  }
+
+  for (const filter of duplicateFilters) {
+    const { data: existing, error } = await supabase
+      .from('orden_eventos_historial')
+      .select('id')
+      .eq('orden_id', orderId)
+      .eq('estado_actual', orderStatus)
+      .contains('datos_snapshot', filter)
+      .limit(1);
+
+    if (error) throw error;
+    if ((existing ?? []).length > 0) return true;
+  }
+
+  return false;
+}
+
 export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> {
   const [
     proformaResult,
@@ -136,7 +331,7 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
   };
 
   return {
-    proforma: ((proformaResult.data ?? []) as PiezaRow[]).map((p) => ({
+    proforma: uniquePieceDamageRows((proformaResult.data ?? []) as PieceDamageRow[]).map((p) => ({
       id: p.id,
       pieza: p.pieza,
       categoria_dano: p.categoria_dano,
@@ -224,147 +419,42 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
 export async function saveOrderStep(
   orderId: string,
   orderStatus: OrderStatus,
-  process: OrderProcess
+  process: OrderProcess,
+  proformaSection?: ProformaSection,
 ): Promise<void> {
   const session = getSession();
 
   switch (orderStatus) {
     case 'LEVANTAMIENTO_PROFORMA': {
-      // 1. Guardar última pieza (lógica existente)
+      // 1. Guardar última pieza sin duplicarla por interacciones/fotos.
       const last = process.proforma.at(-1);
-      if (last?.pieza) {
-        if (last.id) {
-          await supabase.from('orden_piezas_danos').update({
-            pieza: last.pieza,
-            categoria_dano: last.categoria_dano,
-            observacion: last.observacion || null,
-            requiere_reemplazo: last.requiere_reemplazo,
-            costo_estimado: last.costo_estimado || null,
-          }).eq('id', last.id);
-        } else {
-          const { data } = await supabase.from('orden_piezas_danos').insert({
-            orden_id: orderId,
-            pieza: last.pieza,
-            categoria_dano: last.categoria_dano,
-            observacion: last.observacion || null,
-            requiere_reemplazo: last.requiere_reemplazo,
-            costo_estimado: last.costo_estimado || null,
-          }).select('id').single();
-          if (data) last.id = (data as { id: string }).id;
-        }
+      if ((!proformaSection || proformaSection === 'piezas') && last?.pieza) {
+        await savePieceDamage(orderId, last);
       }
 
       // 2. Guardar aprobación (movido desde GESTION_ASEGURADORA)
-      if (session) {
-        const a = process.aseguradora;
-        if (a.id) {
-          await supabase.from('orden_gestion_aseguradora').update({
-            aplica_aseguradora: a.aplica_aseguradora,
-            estado: a.estado,
-            fecha_envio: a.fecha_envio || null,
-            fecha_aprobacion: a.fecha_aprobacion || null,
-            observaciones: a.observaciones || null,
-          }).eq('id', a.id);
-        } else {
-          const { data } = await supabase.from('orden_gestion_aseguradora').insert({
-            orden_id: orderId,
-            usuario_id: session.id,
-            aplica_aseguradora: a.aplica_aseguradora,
-            estado: a.estado,
-            fecha_envio: a.fecha_envio || null,
-            fecha_aprobacion: a.fecha_aprobacion || null,
-            observaciones: a.observaciones || null,
-          }).select('id').single();
-          if (data) a.id = (data as { id: string }).id;
-        }
+      if ((!proformaSection || proformaSection === 'aprobacion') && session) {
+        await saveApproval(orderId, process.aseguradora, session);
       }
 
       // 3. Guardar último repuesto (movido desde COMPRA_REPUESTO)
       const lastRep = process.repuestos.at(-1);
-      if (lastRep && (lastRep.descripcion || lastRep.proveedor || lastRep.costo > 0)) {
-        if (lastRep.id) {
-          await supabase.from('orden_repuestos').update({
-            descripcion_libre: lastRep.descripcion || null,
-            cantidad: lastRep.cantidad,
-            estado: lastRep.estado,
-            proveedor: lastRep.proveedor || null,
-            fecha_estimada_llegada: lastRep.fecha_estimada_llegada || null,
-            fecha_real_llegada: lastRep.fecha_real_llegada || null,
-            costo: lastRep.costo || null,
-            observaciones: lastRep.observaciones || null,
-          }).eq('id', lastRep.id);
-        } else {
-          const { data } = await supabase.from('orden_repuestos').insert({
-            orden_id: orderId,
-            descripcion_libre: lastRep.descripcion || null,
-            cantidad: lastRep.cantidad,
-            estado: lastRep.estado,
-            proveedor: lastRep.proveedor || null,
-            fecha_estimada_llegada: lastRep.fecha_estimada_llegada || null,
-            fecha_real_llegada: lastRep.fecha_real_llegada || null,
-            costo: lastRep.costo || null,
-            observaciones: lastRep.observaciones || null,
-          }).select('id').single();
-          if (data) lastRep.id = (data as { id: string }).id;
-        }
+      if ((!proformaSection || proformaSection === 'repuestos') && lastRep && (lastRep.descripcion || lastRep.proveedor || lastRep.costo > 0)) {
+        await savePart(orderId, lastRep);
       }
       break;
     }
 
     case 'GESTION_ASEGURADORA': {
       if (!session) break;
-      const a = process.aseguradora;
-      if (a.id) {
-        await supabase.from('orden_gestion_aseguradora').update({
-          aplica_aseguradora: a.aplica_aseguradora,
-          estado: a.estado,
-          fecha_envio: a.fecha_envio || null,
-          fecha_aprobacion: a.fecha_aprobacion || null,
-          observaciones: a.observaciones || null,
-        }).eq('id', a.id);
-      } else {
-        const { data } = await supabase.from('orden_gestion_aseguradora').insert({
-          orden_id: orderId,
-          usuario_id: session.id,
-          aplica_aseguradora: a.aplica_aseguradora,
-          estado: a.estado,
-          fecha_envio: a.fecha_envio || null,
-          fecha_aprobacion: a.fecha_aprobacion || null,
-          observaciones: a.observaciones || null,
-        }).select('id').single();
-        if (data) a.id = (data as { id: string }).id;
-      }
+      await saveApproval(orderId, process.aseguradora, session);
       break;
     }
 
     case 'COMPRA_REPUESTO': {
       const last = process.repuestos.at(-1);
       if (!last) break;
-      if (last.id) {
-        await supabase.from('orden_repuestos').update({
-          descripcion_libre: last.descripcion || null,
-          cantidad: last.cantidad,
-          estado: last.estado,
-          proveedor: last.proveedor || null,
-          fecha_estimada_llegada: last.fecha_estimada_llegada || null,
-          fecha_real_llegada: last.fecha_real_llegada || null,
-          costo: last.costo || null,
-          observaciones: last.observaciones || null,
-        }).eq('id', last.id);
-      } else {
-        const { data } = await supabase.from('orden_repuestos').insert({
-          orden_id: orderId,
-          descripcion_libre: last.descripcion || null,
-          cantidad: last.cantidad,
-          estado: last.estado,
-          proveedor: last.proveedor || null,
-          fecha_estimada_llegada: last.fecha_estimada_llegada || null,
-          fecha_real_llegada: last.fecha_real_llegada || null,
-          costo: last.costo || null,
-          observaciones: last.observaciones || null,
-        }).select('id').single();
-        if (data) last.id = (data as { id: string }).id;
-      }
+      await savePart(orderId, last);
       break;
     }
 
@@ -458,6 +548,9 @@ export async function saveOrderStep(
   // Insert latest historial entry (the one just added by withHistoryEntry)
   const lastHistorial = process.historial.at(-1);
   if (lastHistorial && !lastHistorial.id && session) {
+    const isDuplicateHistory = await hasDuplicateSectionHistory(orderId, lastHistorial, orderStatus);
+    if (isDuplicateHistory) return;
+
     await supabase.from('orden_eventos_historial').insert({
       orden_id: orderId,
       usuario_id: session.id,
@@ -477,18 +570,25 @@ export async function executeIslandTask(
   orderId: string
 ): Promise<void> {
   const session = getSession();
+  if (!session) throw new Error('Sesion no encontrada');
+
   const now = new Date().toISOString();
 
   const { data: current } = await supabase
     .from('orden_isla_tareas')
-    .select('estado, fecha_inicio_real')
+    .select('estado, fecha_inicio_real, fecha_fin_real')
     .eq('id', tareaId)
     .single();
 
   if (!current) return;
 
-  const currentState = (current as { estado: string; fecha_inicio_real: string | null });
+  const currentState = (current as { estado: string; fecha_inicio_real: string | null; fecha_fin_real: string | null });
   const isPaused = currentState.estado === 'PAUSADA';
+  const isCompleted = currentState.estado === 'COMPLETADA' || Boolean(currentState.fecha_fin_real);
+  if (isCompleted) return;
+  if (action === 'PAUSAR' && currentState.estado !== 'EN_PROCESO') return;
+  if (action === 'INICIAR' && currentState.estado === 'EN_PROCESO') return;
+  if (action === 'FINALIZAR' && currentState.estado !== 'EN_PROCESO') return;
 
   const eventAction = action === 'INICIAR' && isPaused ? 'REANUDAR' : action;
   const newEstado =
@@ -505,15 +605,17 @@ export async function executeIslandTask(
 
   await supabase.from('orden_isla_tareas').update(updateData).eq('id', tareaId);
 
-  if (session) {
-    await supabase.from('orden_isla_tarea_eventos').insert({
-      tarea_id: tareaId,
-      usuario_id: session.id,
-      accion: eventAction,
-      estado_resultante: newEstado,
-      fecha_hora: now,
-      observacion: `Tarea ${eventAction.toLowerCase()} por operario.`,
-    });
+  await supabase.from('orden_isla_tarea_eventos').insert({
+    tarea_id: tareaId,
+    usuario_id: session.id,
+    accion: eventAction,
+    estado_resultante: newEstado,
+    fecha_hora: now,
+    observacion: `Tarea ${eventAction.toLowerCase()} por operario.`,
+  });
+
+  if (action === 'INICIAR') {
+    await updateOrderStatus(orderId, 'EN_PROCESO_ISLAS', `Tarea ${eventAction.toLowerCase()} en isla.`);
   }
 
   // Auto-advance order when all tasks are done

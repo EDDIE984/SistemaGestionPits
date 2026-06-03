@@ -214,7 +214,7 @@ export function IslandBoardPage() {
                             <div className="rounded-lg bg-gray-50 p-3 text-sm">
                               <p className="font-medium text-gray-900">Historial operativo</p>
                               <div className="mt-2 space-y-1 text-gray-600">
-                                {task.eventos.slice(-3).map((event, index) => (
+                                {task.eventos.slice().reverse().map((event, index) => (
                                   <p key={`${event.fecha_hora}-${index}`}>
                                     {event.accion}: {formatDateTime(event.fecha_hora)}
                                   </p>
@@ -244,7 +244,7 @@ export function IslandBoardPage() {
                             </Button>
                             <Button
                               size="sm"
-                              disabled={!taskId || taskStatus === 'COMPLETADA'}
+                              disabled={!taskId || taskStatus !== 'EN_PROCESO'}
                               onClick={() => { void updateMockIslandTask(task.orden_id, taskId, 'FINALIZAR'); }}
                             >
                               <SquareCheckBig className="h-4 w-4" />

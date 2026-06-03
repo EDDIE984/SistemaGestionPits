@@ -65,9 +65,17 @@ export function signalClasses(signal: IslandSignal) {
 }
 
 export function statusBadgeClasses(status: OrderStatus) {
-  if (status === 'ENTREGADO') return 'bg-green-100 text-green-800';
-  if (status === 'CONTROL_CALIDAD' || status === 'LISTO_ENTREGA') return 'bg-cyan-100 text-cyan-800';
-  if (status === 'EN_PROCESO_ISLAS' || status === 'INICIO_REPARACION') return 'bg-blue-100 text-blue-800';
-  if (status === 'COMPRA_REPUESTO' || status === 'GESTION_ASEGURADORA') return 'bg-yellow-100 text-yellow-800';
-  return 'bg-gray-100 text-gray-800';
+  const classes: Record<OrderStatus, string> = {
+    INGRESADA:               'bg-sky-100 text-sky-700',
+    LEVANTAMIENTO_PROFORMA:  'bg-violet-100 text-violet-700',
+    GESTION_ASEGURADORA:     'bg-amber-100 text-amber-700',
+    COMPRA_REPUESTO:         'bg-orange-100 text-orange-700',
+    PLANIFICACION_REPARACION:'bg-amber-100 text-amber-700',
+    INICIO_REPARACION:       'bg-orange-100 text-orange-700',
+    EN_PROCESO_ISLAS:        'bg-blue-100 text-blue-700',
+    CONTROL_CALIDAD:         'bg-cyan-100 text-cyan-700',
+    LISTO_ENTREGA:           'bg-blue-100 text-blue-700',
+    ENTREGADO:               'bg-teal-100 text-teal-700',
+  };
+  return classes[status] ?? 'bg-gray-100 text-gray-700';
 }

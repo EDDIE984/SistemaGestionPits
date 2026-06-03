@@ -1,8 +1,10 @@
-import { AlertTriangle, Car, CheckCircle2, Clock, DollarSign, Gauge, Wrench } from 'lucide-react';
+import { AlertTriangle, Car, CheckCircle2, Clock, DollarSign, ExternalLink, Gauge, Wrench } from 'lucide-react';
+import { Link } from 'react-router';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { KpiCard } from '@/app/components/KpiCard';
 import { PageHeader } from '@/app/components/PageHeader';
 import { StatusBadge } from '@/app/components/StatusBadge';
+import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Progress } from '@/app/components/ui/progress';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
@@ -126,6 +128,7 @@ export function Dashboard() {
                   <th>Cliente</th>
                   <th>Estado</th>
                   <th>Avance</th>
+                  <th className="text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -141,6 +144,14 @@ export function Dashboard() {
                         <span className="w-10 text-xs text-gray-500">{order.progreso}%</span>
                       </div>
                       <span className="sr-only">{orderStatusLabel(order.estado)}</span>
+                    </td>
+                    <td className="text-right">
+                      <Button asChild variant="outline" size="sm">
+                        <Link to={`/ordenes/${order.id}`}>
+                          <ExternalLink className="h-4 w-4" />
+                          Ir a orden
+                        </Link>
+                      </Button>
                     </td>
                   </tr>
                 ))}

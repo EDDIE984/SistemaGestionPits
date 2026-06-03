@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { fetchOrderProcess, saveOrderStep, emptyProcess as emptyProcessFromService } from '@/app/services/orderProcessService';
+import type { ProformaSection } from '@/app/services/orderProcessService';
 import { fetchOrders, createOrder, updateOrderStatus, deleteOrder } from '@/app/services/ordersService';
 import { executeIslandTask, modifyIslandTask } from '@/app/services/orderProcessService';
 import { supabase } from '@/app/lib/supabase';
@@ -69,12 +70,12 @@ export async function addMockOrder(input: {
   chasis?: string;
   motor?: string;
   observaciones?: string;
-}): Promise<string> {
-  const id = await createOrder(input);
+}): Promise<{ id: string; numero_orden: string }> {
+  const order = await createOrder(input);
   ordersCache = null;
   ordersLoading = false;
   getOrdersSnapshot();
-  return id;
+  return order;
 }
 
 export async function updateMockOrderStatus(
@@ -148,13 +149,14 @@ export function useMockOrderProcess(orderId?: string): OrderProcess | null {
 export async function saveMockOrderProcess(
   orderId: string,
   process: OrderProcess,
-  orderStatus?: OrderStatus
+  orderStatus?: OrderStatus,
+  proformaSection?: ProformaSection
 ): Promise<void> {
   processCache[orderId] = process;
   emitProcessChange();
 
   if (orderStatus) {
-    await saveOrderStep(orderId, orderStatus, process);
+    await saveOrderStep(orderId, orderStatus, process, proformaSection);
     // Refresh from DB to pick up assigned IDs
     processLoading.delete(orderId);
     delete processCache[orderId];
@@ -282,12 +284,10 @@ export async function updateMockIslandTask(
   delete processCache[orderId];
   getProcessesSnapshot();
   getProcessSnapshot(orderId);
-  // Refresh orders in case status changed (all tasks done → CONTROL_CALIDAD)
-  if (action === 'FINALIZAR') {
-    ordersCache = null;
-    ordersLoading = false;
-    getOrdersSnapshot();
-  }
+  // Refresh orders in case status changed (inicio → EN_PROCESO_ISLAS, finalización → CONTROL_CALIDAD)
+  ordersCache = null;
+  ordersLoading = false;
+  getOrdersSnapshot();
 }
 
 export async function modifyMockIslandTask(

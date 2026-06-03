@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
-import { ArrowLeft, CalendarClock, Car, ClipboardCheck, ClipboardList, Factory, Printer, Trash2, UserRound } from 'lucide-react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { ArrowLeft, CalendarClock, Car, ClipboardCheck, ClipboardList, Eye, Factory, ImagePlus, Loader2, Printer, Trash2, UploadCloud, UserRound, X } from 'lucide-react';
 import { PageHeader } from '@/app/components/PageHeader';
 import { printOrderBarcode } from '@/app/components/OrderBarcodeLabel';
 import { StatusBadge } from '@/app/components/StatusBadge';
@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/ta
 import { Textarea } from '@/app/components/ui/textarea';
 import { orderFlow } from '@/app/data/mockData';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
+import { deleteOrderPhoto, fetchOrderPhotos, uploadOrderPhotos } from '@/app/services/orderPhotosService';
 import {
   deleteMockOrder,
   saveMockOrderProcess,
@@ -23,7 +24,7 @@ import {
   useMockOrderProcess,
   useMockOrders,
 } from '@/app/store/mockOrders';
-import type { OrderProcess, OrderStatus } from '@/app/types';
+import type { OrderPhotoAttachment, OrderProcess, OrderStatus } from '@/app/types';
 
 type MockOrderProcess = OrderProcess;
 
@@ -125,6 +126,7 @@ const flowStepStyles = [
 
 export function OrderDetailPage() {
   const { id } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const orders = useMockOrders();
   const order = orders.find((item) => item.id === id);
@@ -133,12 +135,45 @@ export function OrderDetailPage() {
   const [saveNotice, setSaveNotice] = useState('');
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [activeProformaTab, setActiveProformaTab] = useState<'piezas' | 'aprobacion' | 'repuestos'>('piezas');
+  const [photos, setPhotos] = useState<OrderPhotoAttachment[]>([]);
+  const [isPhotosLoading, setIsPhotosLoading] = useState(false);
+  const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const [selectedPhoto, setSelectedPhoto] = useState<OrderPhotoAttachment | null>(null);
 
   useEffect(() => {
     if (order && process) {
       setForm(formFromProcess(order.estado, process, order.tipo_cliente));
     }
   }, [order?.id, order?.estado, process]);
+
+  useEffect(() => {
+    if (location.hash !== '#flujograma') return;
+
+    window.requestAnimationFrame(() => {
+      document.getElementById('flujograma')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [location.hash, order?.id]);
+
+  useEffect(() => {
+    if (!order?.id) return;
+
+    setIsPhotosLoading(true);
+    setPhotoError('');
+    fetchOrderPhotos(order.id)
+      .then(setPhotos)
+      .catch((error) => setPhotoError(error instanceof Error ? error.message : 'No se pudieron cargar las fotos.'))
+      .finally(() => setIsPhotosLoading(false));
+  }, [order?.id]);
+
+  useEffect(() => {
+    if (order?.estado !== 'LEVANTAMIENTO_PROFORMA' || !process) return;
+
+    const nextTab = nextAvailableProformaTab(process, activeProformaTab);
+    if (nextTab !== activeProformaTab) {
+      setActiveProformaTab(nextTab);
+    }
+  }, [activeProformaTab, order?.estado, process]);
 
   if (!order || !process) {
     return (
@@ -161,7 +196,11 @@ export function OrderDetailPage() {
 
   const currentIndex = orderFlow.indexOf(order.estado);
   const previousStatus = currentIndex > 0 ? orderFlow[currentIndex - 1] : null;
-  const nextStatus = getNextStatus(order.estado, form, process);
+  const projectedProcess = applyStepData(process, order.estado, form);
+  const nextStatus = getNextStatus(order.estado, form, projectedProcess);
+  const projectedProformaProgress = proformaProgress(projectedProcess);
+  const isCurrentProformaSectionSavable = order.estado !== 'LEVANTAMIENTO_PROFORMA'
+    || canSaveProformaSection(process, form, activeProformaTab);
 
   const updateField = (field: string, value: string | boolean) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -173,22 +212,40 @@ export function OrderDetailPage() {
   };
 
   const saveCurrentStep = async () => {
-    const nextProcess = withHistoryEntry(
-      applyStepData(process, order.estado, form),
-      order.estado,
-      form
-    );
-    await saveMockOrderProcess(order.id, nextProcess, order.estado);
-    showSavedNotice('Datos guardados.');
-    return nextProcess;
+    if (order.estado === 'LEVANTAMIENTO_PROFORMA' && !canSaveProformaSection(process, form, activeProformaTab)) {
+      showSavedNotice(proformaSaveBlockedMessage(process, activeProformaTab));
+      return process;
+    }
+
+    try {
+      const nextProcess = withHistoryEntry(
+        applyStepData(process, order.estado, form),
+        order.estado,
+        form,
+        activeProformaTab
+      );
+      await saveMockOrderProcess(order.id, nextProcess, order.estado, order.estado === 'LEVANTAMIENTO_PROFORMA' ? activeProformaTab : undefined);
+      showSavedNotice('Datos guardados.');
+      return nextProcess;
+    } catch (error) {
+      showSavedNotice(error instanceof Error ? error.message : 'No se pudo guardar el registro.');
+      return process;
+    }
   };
 
   const handleSaveAndAdvance = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await saveCurrentStep();
-
-    if (nextStatus) {
+    if (order.estado === 'LEVANTAMIENTO_PROFORMA' && nextStatus && proformaProgress(process).partsReceived) {
       await updateMockOrderStatus(order.id, nextStatus, statusObservation(order.estado, form));
+      return;
+    }
+
+    const nextProcess = await saveCurrentStep();
+    if (nextProcess === process) return;
+
+    const nextAfterSave = getNextStatus(order.estado, form, nextProcess);
+    if (nextAfterSave) {
+      await updateMockOrderStatus(order.id, nextAfterSave, statusObservation(order.estado, form));
     }
   };
 
@@ -209,6 +266,33 @@ export function OrderDetailPage() {
 
     await deleteMockOrder(order.id);
     navigate('/ordenes');
+  };
+
+  const handlePhotosUpload = async (files: File[], etapa: OrderPhotoAttachment['etapa'], context?: { pieza?: string }) => {
+    if (!order || files.length === 0) return;
+
+    setIsUploadingPhotos(true);
+    setPhotoError('');
+    try {
+      const uploaded = await uploadOrderPhotos(order.id, files, etapa, context);
+      setPhotos((current) => [...uploaded, ...current]);
+      showSavedNotice(`${uploaded.length} foto(s) cargada(s).`);
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : 'No se pudieron cargar las fotos.');
+    } finally {
+      setIsUploadingPhotos(false);
+    }
+  };
+
+  const handlePhotoDelete = async (photo: OrderPhotoAttachment) => {
+    setPhotoError('');
+    try {
+      await deleteOrderPhoto(photo);
+      setPhotos((current) => current.filter((item) => item.id !== photo.id));
+      setSelectedPhoto((current) => current?.id === photo.id ? null : current);
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : 'No se pudo eliminar la foto.');
+    }
   };
 
   return (
@@ -270,7 +354,10 @@ export function OrderDetailPage() {
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle>Gestion del estado actual</CardTitle>
+                <div className="flex flex-wrap items-center gap-3">
+                  <CardTitle>Gestión del estado actual</CardTitle>
+                  <StatusBadge status={order.estado} />
+                </div>
                 <Button type="button" variant="outline" size="sm" onClick={() => setIsHistoryOpen(true)}>
                   Ver historial
                 </Button>
@@ -289,18 +376,25 @@ export function OrderDetailPage() {
                   form={form}
                   onChange={updateField}
                   process={process}
+                  photos={photos}
+                  isUploadingPhotos={isUploadingPhotos}
+                  onPhotosUpload={handlePhotosUpload}
+                  onPhotoSelect={setSelectedPhoto}
+                  onPhotoDelete={handlePhotoDelete}
                   activeProformaTab={activeProformaTab}
                   onProformaTabChange={setActiveProformaTab}
                 />
 
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => { void saveCurrentStep(); }}>
-                    Guardar datos
-                  </Button>
-                  <Button type="submit" disabled={!nextStatus}>
-                    {nextStatus ? `Guardar y avanzar a ${orderStatusLabel(nextStatus)}` : nextBlockedLabel(order.estado, form, process)}
-                  </Button>
-                </div>
+                {isIslandControlledStatus(order.estado) ? null : (
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button type="button" variant="outline" disabled={!isCurrentProformaSectionSavable} onClick={() => { void saveCurrentStep(); }}>
+                      Guardar datos
+                    </Button>
+                    <Button type="submit" disabled={!nextStatus || (order.estado === 'LEVANTAMIENTO_PROFORMA' && !projectedProformaProgress.partsReceived && !isCurrentProformaSectionSavable)}>
+                      {nextStatus ? `Guardar y avanzar a ${orderStatusLabel(nextStatus)}` : nextBlockedLabel(order.estado, form, process)}
+                    </Button>
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>
@@ -309,7 +403,7 @@ export function OrderDetailPage() {
         </div>
 
         <div className="space-y-6">
-          <Card className="h-fit">
+          <Card id="flujograma" className="h-fit scroll-mt-8">
             <CardHeader>
               <CardTitle>Flujo de trabajo</CardTitle>
             </CardHeader>
@@ -347,6 +441,15 @@ export function OrderDetailPage() {
             </CardContent>
           </Card>
 
+          <PhotoGalleryCard
+            photos={photos}
+            isLoading={isPhotosLoading}
+            error={photoError}
+            pieces={[...process.proforma.map((piece) => piece.pieza), String(form.pieza || '')]}
+            onSelect={setSelectedPhoto}
+            onDelete={handlePhotoDelete}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle>Historial</CardTitle>
@@ -369,16 +472,15 @@ export function OrderDetailPage() {
       </div>
 
       <HistoryDialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen} process={process} />
+      <PhotoPreviewDialog photo={selectedPhoto} onOpenChange={(open) => { if (!open) setSelectedPhoto(null); }} onDelete={handlePhotoDelete} />
     </div>
   );
 }
 
 function getNextStatus(status: OrderStatus, form: StepForm, process: MockOrderProcess) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
-    const aprobada = String(form.estado_aprobacion || '') === 'APROBADO';
-    const repuestosListos = process.repuestos.length > 0
-      && process.repuestos.every((r) => r.estado === 'RECIBIDO');
-    if (!aprobada || !repuestosListos) return null;
+    const progress = proformaProgress(process);
+    if (!progress.approvalApproved || !progress.partsReceived) return null;
     return 'PLANIFICACION_REPARACION' as OrderStatus;
   }
 
@@ -400,13 +502,92 @@ function getNextStatus(status: OrderStatus, form: StepForm, process: MockOrderPr
   return currentIndex < orderFlow.length - 1 ? orderFlow[currentIndex + 1] : null;
 }
 
+function isIslandControlledStatus(status: OrderStatus) {
+  return status === 'INICIO_REPARACION' || status === 'EN_PROCESO_ISLAS';
+}
+
+function proformaProgress(process: MockOrderProcess) {
+  const hasPieces = process.proforma.length > 0;
+  const approvalApproved = process.aseguradora.estado === 'APROBADO';
+  const approvalRejected = process.aseguradora.estado === 'RECHAZADO';
+  const approvalClosed = approvalApproved || approvalRejected;
+  const hasApproval = Boolean(process.aseguradora.id);
+  const partsReceived = process.repuestos.length > 0 && process.repuestos.some((part) => part.estado === 'RECIBIDO');
+  const hasParts = process.repuestos.length > 0;
+
+  return { hasPieces, hasApproval, approvalApproved, approvalRejected, approvalClosed, hasParts, partsReceived };
+}
+
+function proformaFlowMessage(progress: ReturnType<typeof proformaProgress>) {
+  if (!progress.hasPieces) {
+    return 'Registra primero Piezas y Daños. Aprobación y Repuestos se habilitarán después.';
+  }
+
+  if (!progress.approvalClosed) {
+    return 'Piezas y Daños ya está cerrado. Completa la aprobación para habilitar Repuestos.';
+  }
+
+  if (progress.approvalRejected) {
+    return 'La aprobación fue rechazada. La pestaña queda cerrada y la OT no puede avanzar a Repuestos hasta registrar una aprobación válida.';
+  }
+
+  if (!progress.partsReceived) {
+    return 'Piezas y Aprobación ya están cerradas. Completa Repuestos para avanzar en la OT.';
+  }
+
+  return 'Proforma completa. Las pestañas de este flujo quedan cerradas para evitar registros incompletos o duplicados.';
+}
+
+function isProformaTabEnabled(process: MockOrderProcess, tab: 'piezas' | 'aprobacion' | 'repuestos') {
+  const progress = proformaProgress(process);
+
+  if (tab === 'piezas') return !progress.hasPieces && !progress.hasApproval && !progress.hasParts;
+  if (tab === 'aprobacion') return progress.hasPieces && !progress.approvalClosed && !progress.hasParts;
+  return progress.approvalApproved && !progress.partsReceived;
+}
+
+function nextAvailableProformaTab(process: MockOrderProcess, currentTab: 'piezas' | 'aprobacion' | 'repuestos') {
+  if (isProformaTabEnabled(process, currentTab)) return currentTab;
+  if (isProformaTabEnabled(process, 'piezas')) return 'piezas';
+  if (isProformaTabEnabled(process, 'aprobacion')) return 'aprobacion';
+  return 'repuestos';
+}
+
+function canSaveProformaSection(
+  process: MockOrderProcess,
+  form: StepForm,
+  tab: 'piezas' | 'aprobacion' | 'repuestos'
+) {
+  if (!isProformaTabEnabled(process, tab)) return false;
+
+  if (tab === 'piezas') {
+    return String(form.pieza || '').trim().length > 0;
+  }
+
+  if (tab === 'aprobacion') {
+    return String(form.estado_aprobacion || '').trim().length > 0;
+  }
+
+  return String(form.estado_repuesto || '').trim().length > 0;
+}
+
+function proformaSaveBlockedMessage(process: MockOrderProcess, tab: 'piezas' | 'aprobacion' | 'repuestos') {
+  if (!isProformaTabEnabled(process, tab)) {
+    if (tab === 'piezas') return 'Piezas y Daños ya fue registrado. Continúa con Aprobación.';
+    if (tab === 'aprobacion') return 'Aprobación no está habilitada o ya fue completada. Continúa con Repuestos.';
+    return 'Repuestos no está habilitado o ya fue completado.';
+  }
+
+  if (tab === 'piezas') return 'Ingresa una pieza afectada antes de guardar.';
+  if (tab === 'aprobacion') return 'Selecciona un estado de aprobación antes de guardar.';
+  return 'Selecciona un estado de repuesto antes de guardar.';
+}
+
 function nextBlockedLabel(status: OrderStatus, form: StepForm, process: MockOrderProcess) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
-    const aprobada = String(form.estado_aprobacion || '') === 'APROBADO';
-    const repuestosListos = process.repuestos.length > 0
-      && process.repuestos.every((r) => r.estado === 'RECIBIDO');
-    if (!aprobada && !repuestosListos) return 'Requiere aprobación y repuestos';
-    if (!aprobada) return 'Requiere aprobación';
+    const progress = proformaProgress(process);
+    if (!progress.approvalApproved && !progress.partsReceived) return 'Requiere aprobación y repuestos';
+    if (!progress.approvalApproved) return 'Requiere aprobación';
     return 'Repuestos pendientes de recibir';
   }
   if (status === 'ENTREGADO') return 'Orden cerrada';
@@ -492,6 +673,7 @@ function formFromProcess(status: OrderStatus, process: MockOrderProcess, tipo_cl
 
 function applyStepData(process: MockOrderProcess, status: OrderStatus, form: StepForm): MockOrderProcess {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
+    const hasProformaRecords = process.proforma.length > 0 || process.aseguradora.id || process.repuestos.length > 0;
     const pieza = String(form.pieza || '').trim();
     const updatedPieza = {
       pieza,
@@ -504,7 +686,7 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
 
     const updatedAseguradora = {
       ...process.aseguradora,
-      aplica_aseguradora: form.tipo_cliente === 'ASEGURADORA',
+      aplica_aseguradora: hasProformaRecords ? process.aseguradora.aplica_aseguradora : form.tipo_cliente === 'ASEGURADORA',
       estado: String(form.estado_aprobacion || 'PENDIENTE_ENVIO'),
       fecha_envio: String(form.fecha_envio || ''),
       fecha_aprobacion: String(form.fecha_aprobacion || ''),
@@ -595,7 +777,16 @@ function appendItem<T>(items: T[], nextItem: T) {
   return [...items, nextItem];
 }
 
-function withHistoryEntry(process: MockOrderProcess, status: OrderStatus, form: StepForm): MockOrderProcess {
+function withHistoryEntry(
+  process: MockOrderProcess,
+  status: OrderStatus,
+  form: StepForm,
+  activeProformaTab?: 'piezas' | 'aprobacion' | 'repuestos'
+): MockOrderProcess {
+  if (hasDuplicateSectionHistory(process, status, form, activeProformaTab)) {
+    return process;
+  }
+
   return {
     ...process,
     historial: [
@@ -611,6 +802,41 @@ function withHistoryEntry(process: MockOrderProcess, status: OrderStatus, form: 
       },
     ],
   };
+}
+
+function hasDuplicateSectionHistory(
+  process: MockOrderProcess,
+  status: OrderStatus,
+  form: StepForm,
+  activeProformaTab?: 'piezas' | 'aprobacion' | 'repuestos'
+) {
+  if (status !== 'LEVANTAMIENTO_PROFORMA') return false;
+
+  if (activeProformaTab === 'aprobacion') {
+    const estadoAprobacion = String(form.estado_aprobacion || 'PENDIENTE_ENVIO');
+    return process.historial.some((event) => {
+      const data = event.datos;
+      return event.estado_actual === status
+        && isHistoryObject(data)
+        && String(data.estado_aprobacion || '') === estadoAprobacion;
+    });
+  }
+
+  if (activeProformaTab === 'repuestos') {
+    const estadoRepuesto = String(form.estado_repuesto || 'PENDIENTE');
+    return process.historial.some((event) => {
+      const data = event.datos;
+      return event.estado_actual === status
+        && isHistoryObject(data)
+        && String(data.estado_repuesto || '') === estadoRepuesto;
+    });
+  }
+
+  return false;
+}
+
+function isHistoryObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function historyDataForStatus(status: OrderStatus, form: StepForm) {
@@ -688,56 +914,95 @@ interface StepFieldsProps {
   form: StepForm;
   onChange: (field: string, value: string | boolean) => void;
   process: MockOrderProcess;
+  photos: OrderPhotoAttachment[];
+  isUploadingPhotos: boolean;
+  onPhotosUpload: (files: File[], etapa: OrderPhotoAttachment['etapa'], context?: { pieza?: string }) => void;
+  onPhotoSelect: (photo: OrderPhotoAttachment) => void;
+  onPhotoDelete: (photo: OrderPhotoAttachment) => void;
   activeProformaTab: 'piezas' | 'aprobacion' | 'repuestos';
   onProformaTabChange: (tab: 'piezas' | 'aprobacion' | 'repuestos') => void;
 }
 
-function StepFields({ status, form, onChange, process, activeProformaTab, onProformaTabChange }: StepFieldsProps) {
+function StepFields({
+  status,
+  form,
+  onChange,
+  process,
+  photos,
+  isUploadingPhotos,
+  onPhotosUpload,
+  onPhotoSelect,
+  onPhotoDelete,
+  activeProformaTab,
+  onProformaTabChange,
+}: StepFieldsProps) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
-    const tipoCliente = String(form.tipo_cliente || 'PARTICULAR') as 'PARTICULAR' | 'ASEGURADORA';
-    const aprobada = process.aseguradora.estado === 'APROBADO';
+    const hasProformaRecords = process.proforma.length > 0 || process.aseguradora.id || process.repuestos.length > 0;
+    const tipoCliente = (
+      hasProformaRecords
+        ? process.aseguradora.aplica_aseguradora ? 'ASEGURADORA' : 'PARTICULAR'
+        : String(form.tipo_cliente || 'PARTICULAR')
+    ) as 'PARTICULAR' | 'ASEGURADORA';
+    const approvalClosed = ['APROBADO', 'RECHAZADO'].includes(process.aseguradora.estado);
     const repuestosListos = process.repuestos.length > 0
-      && process.repuestos.every((r) => r.estado === 'RECIBIDO');
+      && process.repuestos.some((r) => r.estado === 'RECIBIDO');
+    const progress = proformaProgress(process);
+    const piecesEnabled = isProformaTabEnabled(process, 'piezas');
+    const approvalEnabled = isProformaTabEnabled(process, 'aprobacion');
+    const partsEnabled = isProformaTabEnabled(process, 'repuestos');
 
     return (
       <div className="space-y-4">
         {/* Selector tipo de cliente */}
-        <div className="flex items-center gap-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-gray-700">Tipo de cliente:</span>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="tipo_cliente"
-              value="PARTICULAR"
-              checked={tipoCliente === 'PARTICULAR'}
-              onChange={() => onChange('tipo_cliente', 'PARTICULAR')}
-            />
-            Particular
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="tipo_cliente"
-              value="ASEGURADORA"
-              checked={tipoCliente === 'ASEGURADORA'}
-              onChange={() => onChange('tipo_cliente', 'ASEGURADORA')}
-            />
-            Aseguradora
-          </label>
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-6">
+            <span className="text-sm font-medium text-gray-700">Tipo de cliente:</span>
+            <label className={`flex items-center gap-2 text-sm ${hasProformaRecords ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+              <input
+                type="radio"
+                name="tipo_cliente"
+                value="PARTICULAR"
+                checked={tipoCliente === 'PARTICULAR'}
+                disabled={hasProformaRecords}
+                onChange={() => onChange('tipo_cliente', 'PARTICULAR')}
+              />
+              Particular
+            </label>
+            <label className={`flex items-center gap-2 text-sm ${hasProformaRecords ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+              <input
+                type="radio"
+                name="tipo_cliente"
+                value="ASEGURADORA"
+                checked={tipoCliente === 'ASEGURADORA'}
+                disabled={hasProformaRecords}
+                onChange={() => onChange('tipo_cliente', 'ASEGURADORA')}
+              />
+              Aseguradora
+            </label>
+          </div>
+          {hasProformaRecords ? (
+            <p className="mt-2 text-xs text-gray-500">
+              El tipo de cliente no se puede modificar porque esta OT ya tiene piezas, aprobaciones o repuestos registrados.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          {proformaFlowMessage(progress)}
         </div>
 
         {/* Pestañas */}
         <Tabs value={activeProformaTab} onValueChange={(v) => onProformaTabChange(v as 'piezas' | 'aprobacion' | 'repuestos')}>
           <TabsList className="w-full">
-            <TabsTrigger value="piezas" className="flex-1">
+            <TabsTrigger value="piezas" className="flex-1" disabled={!piecesEnabled}>
               Piezas & Daños
               {process.proforma.length > 0 ? <span className="ml-1 text-green-600">✓</span> : null}
             </TabsTrigger>
-            <TabsTrigger value="aprobacion" className="flex-1">
+            <TabsTrigger value="aprobacion" className="flex-1" disabled={!approvalEnabled}>
               Aprobación
-              {aprobada ? <span className="ml-1 text-green-600">✓</span> : <span className="ml-1 text-amber-500">⚠</span>}
+              {approvalClosed ? <span className="ml-1 text-green-600">✓</span> : <span className="ml-1 text-amber-500">⚠</span>}
             </TabsTrigger>
-            <TabsTrigger value="repuestos" className="flex-1">
+            <TabsTrigger value="repuestos" className="flex-1" disabled={!partsEnabled}>
               Repuestos
               {repuestosListos ? <span className="ml-1 text-green-600">✓</span> : <span className="ml-1 text-amber-500">⚠</span>}
             </TabsTrigger>
@@ -754,8 +1019,16 @@ function StepFields({ status, form, onChange, process, activeProformaTab, onProf
                 options={damageCategoryOptions}
               />
               <Field label="Costo estimado" type="number" value={String(form.costo_estimado)} onChange={(v) => onChange('costo_estimado', v)} placeholder="0.00" />
-              <Field label="URL foto" value={String(form.foto_url_pieza)} onChange={(v) => onChange('foto_url_pieza', v)} placeholder="https://..." />
             </div>
+            <PhotoUploadPanel
+              etapa="PROFORMA"
+              title="Fotos de proforma"
+              photos={photos.filter((photo) => photo.etapa === 'PROFORMA')}
+              isUploading={isUploadingPhotos}
+              onUpload={(files) => onPhotosUpload(files, 'PROFORMA', { pieza: String(form.pieza || '').trim() })}
+              onSelect={onPhotoSelect}
+              onDelete={onPhotoDelete}
+            />
             <CheckField label="Requiere reemplazo" checked={Boolean(form.requiere_reemplazo)} onChange={(v) => onChange('requiere_reemplazo', v)} />
             <TextField label="Observación" value={String(form.observacion_pieza)} onChange={(v) => onChange('observacion_pieza', v)} />
 
@@ -864,6 +1137,15 @@ function StepFields({ status, form, onChange, process, activeProformaTab, onProf
     );
   }
 
+  if (status === 'INICIO_REPARACION' || status === 'EN_PROCESO_ISLAS') {
+    return (
+      <div className="space-y-4">
+        <RepairProgressPanel tasks={process.tareas} />
+        <TextField label="Observación del avance" value={String(form.observacion)} onChange={(value) => onChange('observacion', value)} />
+      </div>
+    );
+  }
+
   if (status === 'CONTROL_CALIDAD') {
     return (
       <div className="space-y-4">
@@ -871,8 +1153,16 @@ function StepFields({ status, form, onChange, process, activeProformaTab, onProf
           <SelectField label="Resultado general" value={String(form.resultado)} onChange={(value) => onChange('resultado', value)} options={['APROBADO', 'RECHAZADO']} />
           <Field label="Punto de control" value={String(form.punto_control)} onChange={(value) => onChange('punto_control', value)} />
           <SelectField label="Resultado del punto" value={String(form.punto_resultado)} onChange={(value) => onChange('punto_resultado', value)} options={['APROBADO', 'OBSERVADO']} />
-          <Field label="URL foto revision" value={String(form.foto_url)} onChange={(value) => onChange('foto_url', value)} placeholder="https://..." />
         </div>
+        <PhotoUploadPanel
+          etapa="CALIDAD"
+          title="Fotos de revisión"
+          photos={photos.filter((photo) => photo.etapa === 'CALIDAD')}
+          isUploading={isUploadingPhotos}
+          onUpload={(files) => onPhotosUpload(files, 'CALIDAD')}
+          onSelect={onPhotoSelect}
+          onDelete={onPhotoDelete}
+        />
         <TextField label="Observaciones" value={String(form.observaciones)} onChange={(value) => onChange('observaciones', value)} />
       </div>
     );
@@ -883,8 +1173,16 @@ function StepFields({ status, form, onChange, process, activeProformaTab, onProf
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Fecha notificacion cliente" type="datetime-local" value={String(form.fecha_notificacion_cliente)} onChange={(value) => onChange('fecha_notificacion_cliente', value)} />
-          <Field label="URL foto entrega" value={String(form.foto_url)} onChange={(value) => onChange('foto_url', value)} placeholder="https://..." />
         </div>
+        <PhotoUploadPanel
+          etapa="ENTREGA"
+          title="Fotos para entrega"
+          photos={photos.filter((photo) => photo.etapa === 'ENTREGA')}
+          isUploading={isUploadingPhotos}
+          onUpload={(files) => onPhotosUpload(files, 'ENTREGA')}
+          onSelect={onPhotoSelect}
+          onDelete={onPhotoDelete}
+        />
         <TextField label="Observaciones de entrega" value={String(form.observaciones)} onChange={(value) => onChange('observaciones', value)} />
       </div>
     );
@@ -895,8 +1193,16 @@ function StepFields({ status, form, onChange, process, activeProformaTab, onProf
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Fecha entrega real" type="datetime-local" value={String(form.fecha_entrega_real)} onChange={(value) => onChange('fecha_entrega_real', value)} />
-          <Field label="URL foto final" value={String(form.foto_url)} onChange={(value) => onChange('foto_url', value)} placeholder="https://..." />
         </div>
+        <PhotoUploadPanel
+          etapa="ENTREGA"
+          title="Fotos finales"
+          photos={photos.filter((photo) => photo.etapa === 'ENTREGA')}
+          isUploading={isUploadingPhotos}
+          onUpload={(files) => onPhotosUpload(files, 'ENTREGA')}
+          onSelect={onPhotoSelect}
+          onDelete={onPhotoDelete}
+        />
         <CheckField label="Confirmacion de entrega" checked={Boolean(form.confirmada)} onChange={(value) => onChange('confirmada', value)} />
         <TextField label="Observaciones finales" value={String(form.observaciones)} onChange={(value) => onChange('observaciones', value)} />
       </div>
@@ -977,6 +1283,518 @@ function SelectField({
       </Select>
     </div>
   );
+}
+
+function RepairProgressPanel({ tasks }: { tasks: MockOrderProcess['tareas'] }) {
+  const orderedTasks = tasks.slice().sort((a, b) => new Date(a.fecha_inicio_planificada).getTime() - new Date(b.fecha_inicio_planificada).getTime());
+  const summary = repairProgressSummary(orderedTasks);
+
+  if (orderedTasks.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        No hay islas planificadas para esta OT. Regresa a planificación y asigna las tareas antes de iniciar reparación.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <RepairMetric title="Islas asignadas" value={String(summary.total)} detail={`${summary.completed} completada(s)`} />
+        <RepairMetric title="Avance temporal" value={`${summary.averageProgress}%`} detail={`${summary.inProgress} en proceso`} />
+        <RepairMetric title="Ventana planificada" value={summary.windowLabel} detail={summary.overdueCount > 0 ? `${summary.overdueCount} atrasada(s)` : 'Sin atrasos críticos'} />
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white">
+        <div className="border-b border-gray-100 px-4 py-3">
+          <p className="text-sm font-medium text-gray-900">Islas y fechas planificadas</p>
+          <p className="mt-1 text-xs text-gray-500">El avance se calcula contra la duración planificada de cada tarea.</p>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {orderedTasks.map((task, index) => {
+            const progress = repairTaskProgress(task);
+            return (
+              <div key={task.id ?? `${task.isla}-${task.operacion}-${index}`} className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{task.isla}</p>
+                    <p className="mt-1 text-sm text-gray-600">{task.operacion || 'Operación por definir'}</p>
+                    <p className="mt-1 text-xs text-gray-500">{task.tecnico || 'Técnico sin asignar'}</p>
+                  </div>
+                  <span className={`rounded px-2 py-1 text-xs font-medium ${repairStatusClass(task.estado)}`}>
+                    {task.estado ?? 'PENDIENTE'}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-2">
+                  <span>Inicio planificado: {formatDateTime(task.fecha_inicio_planificada)}</span>
+                  <span>Fin planificado: {formatDateTime(task.fecha_fin_planificada)}</span>
+                  {task.fecha_inicio_real ? <span>Inicio real: {formatDateTime(task.fecha_inicio_real)}</span> : null}
+                  {task.fecha_fin_real ? <span>Fin real: {formatDateTime(task.fecha_fin_real)}</span> : null}
+                </div>
+
+                <div className="mt-3">
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="text-gray-500">{progress.label}</span>
+                    <span className="font-medium text-gray-900">{progress.percent}%</span>
+                  </div>
+                  <Progress value={progress.percent} className="h-2" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <RepairTimeManagementPanel tasks={orderedTasks} />
+    </div>
+  );
+}
+
+function RepairTimeManagementPanel({ tasks }: { tasks: MockOrderProcess['tareas'] }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white">
+      <div className="border-b border-gray-100 px-4 py-3">
+        <p className="text-sm font-medium text-gray-900">Gestión de tiempos por isla</p>
+        <p className="mt-1 text-xs text-gray-500">Lectura operativa de inicio, pausas, reanudaciones y finalización registradas desde la pantalla de isla.</p>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {tasks.map((task, index) => {
+          const timing = repairTimingSummary(task);
+          return (
+            <div key={task.id ?? `${task.isla}-tiempos-${index}`} className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{task.isla}</p>
+                  <p className="mt-1 text-sm text-gray-600">{task.operacion || 'Operación por definir'}</p>
+                </div>
+                <span className={`rounded px-2 py-1 text-xs font-medium ${repairStatusClass(task.estado)}`}>
+                  {task.estado ?? 'PENDIENTE'}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <RepairMetric title="Tiempo activo" value={formatDuration(timing.activeMs)} detail={timing.activeLabel} />
+                <RepairMetric title="Tiempo pausado" value={formatDuration(timing.pausedMs)} detail={`${timing.pauseCount} pausa(s)`} />
+                <RepairMetric title="Tiempo total" value={formatDuration(timing.totalMs)} detail={timing.totalLabel} />
+              </div>
+
+              {timing.events.length > 0 ? (
+                <div className="mt-4 rounded-lg bg-gray-50 p-3">
+                  <p className="text-xs font-medium uppercase text-gray-500">Bitácora operativa</p>
+                  <div className="mt-3 space-y-2">
+                    {timing.events.map((event, eventIndex) => (
+                      <div key={`${event.fecha_hora}-${eventIndex}`} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded px-2 py-0.5 text-xs font-medium ${repairActionClass(event.accion)}`}>
+                            {event.accion}
+                          </span>
+                          <span className="text-gray-600">{event.observacion || event.estado_resultante}</span>
+                        </div>
+                        <span className="text-xs text-gray-500">{formatDateTime(event.fecha_hora)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                  Aún no hay eventos operativos. El historial aparecerá cuando el operario inicie la tarea desde la pantalla de isla.
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RepairMetric({ title, value, detail }: { title: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <p className="text-xs uppercase text-gray-500">{title}</p>
+      <p className="mt-1 text-lg font-semibold text-gray-900">{value}</p>
+      <p className="mt-1 text-xs text-gray-500">{detail}</p>
+    </div>
+  );
+}
+
+function repairTaskProgress(task: MockOrderProcess['tareas'][number]) {
+  if (task.estado === 'COMPLETADA' || task.fecha_fin_real) {
+    return { percent: 100, label: 'Completada' };
+  }
+
+  const plannedStart = new Date(task.fecha_inicio_planificada).getTime();
+  const plannedEnd = new Date(task.fecha_fin_planificada).getTime();
+  const now = Date.now();
+
+  if (!Number.isFinite(plannedStart) || !Number.isFinite(plannedEnd) || plannedEnd <= plannedStart) {
+    return { percent: task.estado === 'EN_PROCESO' ? 50 : 0, label: 'Sin ventana válida' };
+  }
+
+  if (now <= plannedStart && !task.fecha_inicio_real) {
+    return { percent: 0, label: 'Pendiente según planificación' };
+  }
+
+  const elapsed = Math.max(0, now - plannedStart);
+  const duration = plannedEnd - plannedStart;
+  const percent = Math.min(100, Math.round((elapsed / duration) * 100));
+  const label = now > plannedEnd ? 'Tiempo planificado vencido' : task.estado === 'EN_PROCESO' ? 'En ejecución' : 'Avance por calendario';
+
+  return { percent, label };
+}
+
+function repairTimingSummary(task: MockOrderProcess['tareas'][number]) {
+  const events = (task.eventos ?? [])
+    .slice()
+    .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime());
+  const now = Date.now();
+  let activeStartedAt: number | null = null;
+  let pauseStartedAt: number | null = null;
+  let activeMs = 0;
+  let pausedMs = 0;
+  let pauseCount = 0;
+
+  for (const event of events) {
+    const eventTime = new Date(event.fecha_hora).getTime();
+    if (!Number.isFinite(eventTime)) continue;
+
+    if (event.accion === 'INICIAR' || event.accion === 'REANUDAR') {
+      if (pauseStartedAt !== null) {
+        pausedMs += Math.max(0, eventTime - pauseStartedAt);
+        pauseStartedAt = null;
+      }
+      activeStartedAt = eventTime;
+    }
+
+    if (event.accion === 'PAUSAR') {
+      if (activeStartedAt !== null) {
+        activeMs += Math.max(0, eventTime - activeStartedAt);
+        activeStartedAt = null;
+      }
+      pauseStartedAt = eventTime;
+      pauseCount += 1;
+    }
+
+    if (event.accion === 'FINALIZAR') {
+      if (activeStartedAt !== null) {
+        activeMs += Math.max(0, eventTime - activeStartedAt);
+        activeStartedAt = null;
+      }
+      if (pauseStartedAt !== null) {
+        pausedMs += Math.max(0, eventTime - pauseStartedAt);
+        pauseStartedAt = null;
+      }
+    }
+  }
+
+  if (activeStartedAt !== null && task.estado === 'EN_PROCESO') {
+    activeMs += Math.max(0, now - activeStartedAt);
+  }
+
+  if (pauseStartedAt !== null && task.estado === 'PAUSADA') {
+    pausedMs += Math.max(0, now - pauseStartedAt);
+  }
+
+  const firstStart = events.find((event) => event.accion === 'INICIAR')?.fecha_hora ?? task.fecha_inicio_real;
+  const end = task.fecha_fin_real ?? events.findLast((event) => event.accion === 'FINALIZAR')?.fecha_hora;
+  const firstStartMs = firstStart ? new Date(firstStart).getTime() : null;
+  const endMs = end ? new Date(end).getTime() : null;
+  const totalMs = firstStartMs && Number.isFinite(firstStartMs)
+    ? Math.max(0, (endMs && Number.isFinite(endMs) ? endMs : now) - firstStartMs)
+    : 0;
+
+  return {
+    events,
+    activeMs,
+    pausedMs,
+    totalMs,
+    pauseCount,
+    activeLabel: task.estado === 'EN_PROCESO' ? 'Contando ahora' : 'Acumulado',
+    totalLabel: end ? 'Cerrado' : firstStart ? 'Desde inicio real' : 'Sin inicio real',
+  };
+}
+
+function formatDuration(milliseconds: number) {
+  const totalMinutes = Math.max(0, Math.round(milliseconds / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes} min`;
+  return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+}
+
+function repairProgressSummary(tasks: MockOrderProcess['tareas']) {
+  const progresses = tasks.map((task) => repairTaskProgress(task).percent);
+  const total = tasks.length;
+  const completed = tasks.filter((task) => task.estado === 'COMPLETADA' || task.fecha_fin_real).length;
+  const inProgress = tasks.filter((task) => task.estado === 'EN_PROCESO').length;
+  const overdueCount = tasks.filter((task) => {
+    const plannedEnd = new Date(task.fecha_fin_planificada).getTime();
+    return Number.isFinite(plannedEnd) && Date.now() > plannedEnd && task.estado !== 'COMPLETADA' && !task.fecha_fin_real;
+  }).length;
+  const averageProgress = total > 0 ? Math.round(progresses.reduce((sum, value) => sum + value, 0) / total) : 0;
+  const starts = tasks.map((task) => new Date(task.fecha_inicio_planificada).getTime()).filter(Number.isFinite);
+  const ends = tasks.map((task) => new Date(task.fecha_fin_planificada).getTime()).filter(Number.isFinite);
+  const windowLabel = starts.length > 0 && ends.length > 0
+    ? `${formatDateTime(new Date(Math.min(...starts)).toISOString())} - ${formatDateTime(new Date(Math.max(...ends)).toISOString())}`
+    : 'Sin fechas';
+
+  return { total, completed, inProgress, overdueCount, averageProgress, windowLabel };
+}
+
+function repairStatusClass(status?: string) {
+  if (status === 'COMPLETADA') return 'bg-green-100 text-green-700';
+  if (status === 'EN_PROCESO') return 'bg-blue-100 text-blue-700';
+  if (status === 'PAUSADA') return 'bg-amber-100 text-amber-700';
+  return 'bg-gray-100 text-gray-700';
+}
+
+function repairActionClass(action: string) {
+  if (action === 'INICIAR' || action === 'REANUDAR') return 'bg-blue-100 text-blue-700';
+  if (action === 'PAUSAR') return 'bg-amber-100 text-amber-700';
+  if (action === 'FINALIZAR') return 'bg-green-100 text-green-700';
+  return 'bg-gray-100 text-gray-700';
+}
+
+function PhotoUploadPanel({
+  title,
+  photos,
+  isUploading,
+  onUpload,
+  onSelect,
+  onDelete,
+}: {
+  etapa: OrderPhotoAttachment['etapa'];
+  title: string;
+  photos: OrderPhotoAttachment[];
+  isUploading: boolean;
+  onUpload: (files: File[]) => void;
+  onSelect: (photo: OrderPhotoAttachment) => void;
+  onDelete: (photo: OrderPhotoAttachment) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFiles = (files: FileList | null) => {
+    const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length > 0) onUpload(imageFiles);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  return (
+    <div className="rounded-lg border border-dashed border-gray-300 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <Label>{title}</Label>
+          <p className="mt-1 text-xs text-gray-500">{photos.length} foto(s) cargada(s)</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" disabled={isUploading} onClick={() => inputRef.current?.click()}>
+          {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+          Cargar fotos
+        </Button>
+        <input
+          ref={inputRef}
+          className="hidden"
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(event) => handleFiles(event.target.files)}
+        />
+      </div>
+
+      {photos.length > 0 ? (
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {photos.slice(0, 8).map((photo) => (
+            <PhotoThumbnail key={photo.id} photo={photo} onSelect={onSelect} onDelete={onDelete} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4 flex min-h-28 items-center justify-center rounded-md bg-gray-50 text-center text-sm text-gray-500">
+          <div>
+            <ImagePlus className="mx-auto mb-2 h-5 w-5 text-gray-400" />
+            Sube una o varias fotos
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhotoGalleryCard({
+  photos,
+  isLoading,
+  error,
+  pieces,
+  onSelect,
+  onDelete,
+}: {
+  photos: OrderPhotoAttachment[];
+  isLoading: boolean;
+  error: string;
+  pieces: string[];
+  onSelect: (photo: OrderPhotoAttachment) => void;
+  onDelete: (photo: OrderPhotoAttachment) => void;
+}) {
+  const groups = photoGalleryGroups(photos, pieces);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Galería de fotos</CardTitle>
+          <p className="mt-1 text-sm text-gray-600">Agrupada por pieza afectada y etapa.</p>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        ) : null}
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 rounded-md bg-gray-50 p-4 text-sm text-gray-600">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Cargando fotos...
+          </div>
+        ) : groups.length > 0 ? (
+          <div className="space-y-4">
+            {groups.map((group) => (
+              <div key={group.title} className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-gray-900">{group.title}</p>
+                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{group.photos.length}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {group.photos.map((photo) => (
+                    <PhotoThumbnail key={photo.id} photo={photo} onSelect={onSelect} onDelete={onDelete} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-5 text-center">
+            <ImagePlus className="mx-auto h-6 w-6 text-gray-400" />
+            <p className="mt-2 text-sm font-medium text-gray-800">Sin fotos cargadas</p>
+            <p className="mt-1 text-xs text-gray-500">Agrega evidencia visual de proforma, calidad o entrega.</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function photoGalleryGroups(photos: OrderPhotoAttachment[], pieces: string[]) {
+  const proformaPhotos = photos.filter((photo) => photo.etapa === 'PROFORMA');
+  const normalizedPieces = pieces.map((piece) => piece.trim()).filter(Boolean);
+  const groups: Array<{ title: string; photos: OrderPhotoAttachment[] }> = [];
+  const usedPhotoIds = new Set<string>();
+
+  for (const piece of normalizedPieces) {
+    const piecePhotos = proformaPhotos.filter((photo) => normalizePhotoPiece(photo.pieza) === normalizePhotoPiece(piece));
+    if (piecePhotos.length > 0) {
+      groups.push({ title: piece, photos: piecePhotos });
+      piecePhotos.forEach((photo) => usedPhotoIds.add(photo.id));
+    }
+  }
+
+  const unassignedProforma = proformaPhotos.filter((photo) => !usedPhotoIds.has(photo.id));
+  if (unassignedProforma.length > 0) {
+    groups.push({ title: 'Sin pieza asignada', photos: unassignedProforma });
+  }
+
+  for (const etapa of ['CALIDAD', 'ENTREGA', 'GENERAL'] as const) {
+    const stagePhotos = photos.filter((photo) => photo.etapa === etapa);
+    if (stagePhotos.length > 0) {
+      groups.push({ title: photoStageLabel(etapa), photos: stagePhotos });
+    }
+  }
+
+  return groups;
+}
+
+function normalizePhotoPiece(value?: string) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function PhotoThumbnail({
+  photo,
+  onSelect,
+  onDelete,
+}: {
+  photo: OrderPhotoAttachment;
+  onSelect: (photo: OrderPhotoAttachment) => void;
+  onDelete: (photo: OrderPhotoAttachment) => void;
+}) {
+  return (
+    <div className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 bg-gray-100">
+      <img src={photo.url} alt={photo.nombre} className="h-full w-full object-cover" loading="lazy" />
+      <div className="absolute inset-x-0 bottom-0 bg-black/55 px-2 py-1 text-[11px] font-medium text-white">
+        {photoStageLabel(photo.etapa)}
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+        <Button type="button" variant="secondary" size="icon" aria-label="Ver foto" onClick={() => onSelect(photo)}>
+          <Eye className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="destructive" size="icon" aria-label="Eliminar foto" onClick={() => onDelete(photo)}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PhotoPreviewDialog({
+  photo,
+  onOpenChange,
+  onDelete,
+}: {
+  photo: OrderPhotoAttachment | null;
+  onOpenChange: (open: boolean) => void;
+  onDelete: (photo: OrderPhotoAttachment) => void;
+}) {
+  return (
+    <Dialog open={Boolean(photo)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden p-0">
+        {photo ? (
+          <div className="grid max-h-[90vh] grid-cols-1 md:grid-cols-[1fr_260px]">
+            <div className="flex min-h-80 items-center justify-center bg-black">
+              <img src={photo.url} alt={photo.nombre} className="max-h-[90vh] w-full object-contain" />
+            </div>
+            <div className="space-y-4 overflow-y-auto p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase text-gray-500">{photoStageLabel(photo.etapa)}</p>
+                  <DialogTitle className="mt-1 break-words text-lg">{photo.nombre}</DialogTitle>
+                </div>
+                <Button type="button" variant="ghost" size="icon" aria-label="Cerrar visor" onClick={() => onOpenChange(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600">Cargada el {formatDateTime(photo.created_at)}</p>
+              <Button type="button" variant="destructive" className="w-full" onClick={() => onDelete(photo)}>
+                <Trash2 className="h-4 w-4" />
+                Eliminar foto
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function photoStageLabel(etapa: OrderPhotoAttachment['etapa']) {
+  const labels: Record<OrderPhotoAttachment['etapa'], string> = {
+    PROFORMA: 'Proforma',
+    CALIDAD: 'Calidad',
+    ENTREGA: 'Entrega',
+    GENERAL: 'General',
+  };
+
+  return labels[etapa];
 }
 
 function SavedDataSummary({ process }: { process: MockOrderProcess }) {

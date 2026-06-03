@@ -1,4 +1,5 @@
 import { BarChart3, ClipboardList, Clock, DollarSign, Download, History, UserCheck, Wrench } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '@/app/components/PageHeader';
 import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { Button } from '@/app/components/ui/button';
@@ -42,6 +43,7 @@ export function ReportsPage() {
   const estimatedCost = tasks.reduce((total, task) => total + Number(task.tiempo_estandar_horas || 0) * Number(task.tarifa_hora || 0), 0);
   const completedTasks = tasks.filter((task) => task.estado === 'COMPLETADA');
   const productivity = productivityByTechnician(tasks);
+  const islandPerformance = performanceByIsland(tasks);
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -69,6 +71,80 @@ export function ReportsPage() {
         <MetricCard title="Tareas isla" value={String(tasks.length)} detail={`${completedTasks.length} completadas`} icon={Wrench} />
         <MetricCard title="Atrasos" value={String(delayedTasks.length)} detail="Fin planificado vencido" icon={Clock} />
         <MetricCard title="Costo estimado" value={formatMoney(estimatedCost)} detail="Mano de obra planificada" icon={DollarSign} />
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Horas por isla</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {islandPerformance.length === 0 ? (
+              <EmptyText text="No hay tareas con tiempos para graficar." />
+            ) : (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={islandPerformance}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="isla" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip formatter={(value) => `${Number(value).toFixed(1)}h`} />
+                    <Legend />
+                    <Bar dataKey="horasPlanificadas" name="Planificadas" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="horasReales" name="Reales" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Eficiencia por isla</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {islandPerformance.length === 0 ? (
+              <EmptyText text="No hay tiempo real registrado." />
+            ) : (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={islandPerformance}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="isla" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} unit="%" />
+                    <Tooltip formatter={(value) => `${Number(value).toFixed(0)}%`} />
+                    <ReferenceLine y={100} stroke="#64748b" strokeDasharray="4 4" label="Meta" />
+                    <Bar dataKey="eficiencia" name="Eficiencia" fill="#0f766e" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Atraso acumulado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {islandPerformance.length === 0 ? (
+              <EmptyText text="No hay atrasos calculables." />
+            ) : (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={islandPerformance}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="isla" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip formatter={(value) => `${Number(value).toFixed(1)}h`} />
+                    <Bar dataKey="horasAtraso" name="Horas atraso" fill="#dc2626" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -257,4 +333,109 @@ function productivityByTechnician(tasks: Array<{ tecnico?: string; tiempo_estand
   }, {});
 
   return Object.values(grouped).sort((a, b) => b.tareas - a.tareas);
+}
+
+type ReportTask = {
+  isla?: string;
+  tiempo_estandar_horas: number;
+  tarifa_hora: number;
+  fecha_inicio_planificada?: string;
+  fecha_fin_planificada?: string;
+  fecha_inicio_real?: string;
+  fecha_fin_real?: string;
+  estado?: string;
+  eventos?: Array<{
+    accion: 'INICIAR' | 'PAUSAR' | 'REANUDAR' | 'FINALIZAR';
+    fecha_hora: string;
+  }>;
+};
+
+function performanceByIsland(tasks: ReportTask[]) {
+  const grouped = tasks.reduce<Record<string, {
+    isla: string;
+    tareas: number;
+    completadas: number;
+    horasPlanificadas: number;
+    horasReales: number;
+    horasAtraso: number;
+  }>>((acc, task) => {
+    const isla = task.isla || 'Sin isla';
+    if (!acc[isla]) {
+      acc[isla] = {
+        isla,
+        tareas: 0,
+        completadas: 0,
+        horasPlanificadas: 0,
+        horasReales: 0,
+        horasAtraso: 0,
+      };
+    }
+
+    const realHours = taskRealHours(task);
+    acc[isla].tareas += 1;
+    acc[isla].completadas += task.estado === 'COMPLETADA' ? 1 : 0;
+    acc[isla].horasPlanificadas += Number(task.tiempo_estandar_horas || 0);
+    acc[isla].horasReales += realHours;
+    acc[isla].horasAtraso += taskDelayHours(task);
+    return acc;
+  }, {});
+
+  return Object.values(grouped)
+    .map((item) => ({
+      ...item,
+      horasPlanificadas: roundOne(item.horasPlanificadas),
+      horasReales: roundOne(item.horasReales),
+      horasAtraso: roundOne(item.horasAtraso),
+      eficiencia: item.horasReales > 0 ? Math.round((item.horasPlanificadas / item.horasReales) * 100) : 0,
+    }))
+    .sort((a, b) => b.horasAtraso - a.horasAtraso || b.tareas - a.tareas);
+}
+
+function taskRealHours(task: ReportTask) {
+  const events = (task.eventos ?? [])
+    .slice()
+    .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime());
+  let activeStart: number | null = null;
+  let activeMs = 0;
+
+  for (const event of events) {
+    const time = new Date(event.fecha_hora).getTime();
+    if (!Number.isFinite(time)) continue;
+
+    if (event.accion === 'INICIAR' || event.accion === 'REANUDAR') {
+      activeStart = time;
+    }
+
+    if ((event.accion === 'PAUSAR' || event.accion === 'FINALIZAR') && activeStart !== null) {
+      activeMs += Math.max(0, time - activeStart);
+      activeStart = null;
+    }
+  }
+
+  if (activeStart !== null && task.estado === 'EN_PROCESO') {
+    activeMs += Math.max(0, Date.now() - activeStart);
+  }
+
+  if (activeMs === 0 && task.fecha_inicio_real && task.fecha_fin_real) {
+    activeMs = Math.max(0, new Date(task.fecha_fin_real).getTime() - new Date(task.fecha_inicio_real).getTime());
+  }
+
+  return activeMs / 3600000;
+}
+
+function taskDelayHours(task: ReportTask) {
+  if (!task.fecha_fin_planificada) return 0;
+  const plannedEnd = new Date(task.fecha_fin_planificada).getTime();
+  if (!Number.isFinite(plannedEnd)) return 0;
+  const actualEnd = task.fecha_fin_real
+    ? new Date(task.fecha_fin_real).getTime()
+    : task.estado === 'COMPLETADA'
+      ? plannedEnd
+      : Date.now();
+
+  return Math.max(0, (actualEnd - plannedEnd) / 3600000);
+}
+
+function roundOne(value: number) {
+  return Math.round(value * 10) / 10;
 }

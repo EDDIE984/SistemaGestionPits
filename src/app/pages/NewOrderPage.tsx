@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { AlertCircle, Car, Loader2, Search } from 'lucide-react';
+import { AlertCircle, Car, CheckCircle2, Loader2, Printer, Search } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/app/auth/AuthContext';
 import { PageHeader } from '@/app/components/PageHeader';
+import { OrderBarcodeLabel, printOrderBarcode } from '@/app/components/OrderBarcodeLabel';
 import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { Alert, AlertDescription, AlertTitle } from '@/app/components/ui/alert';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
@@ -61,6 +63,7 @@ export function NewOrderPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [lookupInfo, setLookupInfo] = useState('');
+  const [createdOrder, setCreatedOrder] = useState<{ id: string; numero_orden: string } | null>(null);
 
   useEffect(() => {
     fetchAseguradoras().then(setAseguradoras).catch(() => undefined);
@@ -91,7 +94,7 @@ export function NewOrderPage() {
 
     setIsSubmitting(true);
     try {
-      await addMockOrder({
+      const order = await addMockOrder({
         sucursal_id: form.sucursal_id,
         aseguradora_id: form.aseguradora_id || null,
         cedula: form.cedula.trim() || undefined,
@@ -107,12 +110,24 @@ export function NewOrderPage() {
         motor: form.motor.trim() || undefined,
         observaciones: form.observaciones.trim() || undefined,
       });
-      navigate('/ordenes');
+      setCreatedOrder(order);
     } catch (err) {
       setLookupError(err instanceof Error ? err.message : 'Error al guardar la orden.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCloseSuccess = () => {
+    setCreatedOrder(null);
+    navigate('/ordenes');
+  };
+
+  const handleGoToCreatedOrderFlow = () => {
+    if (!createdOrder) return;
+
+    setCreatedOrder(null);
+    navigate(`/ordenes/${createdOrder.id}#flujograma`);
   };
 
   const handleCedulaLookup = async () => {
@@ -350,6 +365,33 @@ export function NewOrderPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={Boolean(createdOrder)} onOpenChange={(open) => { if (!open) handleCloseSuccess(); }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <div className="mb-1 flex items-center gap-2 text-emerald-700">
+              <CheckCircle2 className="h-5 w-5" />
+              <span className="text-sm font-semibold">Orden generada correctamente</span>
+            </div>
+            <DialogTitle>Imprime la etiqueta de ingreso</DialogTitle>
+            <DialogDescription>
+              Coloca el codigo de barras en la documentacion o el vehiculo para identificar la OT durante el proceso.
+            </DialogDescription>
+          </DialogHeader>
+
+          {createdOrder ? <OrderBarcodeLabel numeroOrden={createdOrder.numero_orden} /> : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={handleGoToCreatedOrderFlow}>
+              Ir a orden
+            </Button>
+            <Button type="button" onClick={() => { if (createdOrder) printOrderBarcode(createdOrder.numero_orden); }}>
+              <Printer className="h-4 w-4" />
+              Imprimir codigo de barras
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

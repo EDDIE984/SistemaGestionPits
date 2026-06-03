@@ -374,6 +374,7 @@
       </div>
       <nav aria-label="Contenido">
         <a href="#vercel">Funcionamiento en Vercel</a>
+        <a href="#salud">0. Verificacion del servicio</a>
         <a href="#login">1. Login operaciones</a>
         <a href="#operacion">2. Operacion de isla</a>
         <a href="#flujo">Flujo recomendado</a>
@@ -397,6 +398,7 @@
           <h2>Base URL en Vercel</h2>
           <p>Reemplaza el dominio por el de tu despliegue.</p>
           <div class="pill-list">
+            <span class="pill">GET /api/pda-health</span>
             <span class="pill">POST /api/logeo_Operaciones</span>
             <span class="pill">POST /api/operacion-isla</span>
           </div>
@@ -412,6 +414,10 @@
         </p>
         <pre><code>https://tu-dominio.vercel.app/api/logeo_Operaciones
 https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
+        <p>
+          En el despliegue actual de PITS, la base URL es:
+        </p>
+        <pre><code>https://sistema-gestion-pits.vercel.app</code></pre>
         <div class="note">
           Variables requeridas en Vercel: <code>SUPABASE_SERVICE_ROLE_KEY</code> y
           <code>SUPABASE_URL</code>. Si no existe <code>SUPABASE_URL</code>, el servicio usa
@@ -420,6 +426,35 @@ https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
         <div class="note warning">
           <strong>Importante:</strong> la llave <code>SUPABASE_SERVICE_ROLE_KEY</code> nunca debe
           enviarse al frontend ni a Flutter. Solo vive en Environment Variables de Vercel.
+        </div>
+      </section>
+
+      <section id="salud">
+        <h2>0. Verificacion del servicio</h2>
+        <p class="endpoint"><span class="method">GET</span> /api/pda-health</p>
+        <p>
+          Permite validar que las funciones PDA estan publicadas y que Vercel tiene configuradas
+          las variables necesarias para conectarse a Supabase. No expone valores secretos, solo
+          confirma si existen.
+        </p>
+
+        <h3>cURL</h3>
+        <pre><code>curl "https://sistema-gestion-pits.vercel.app/api/pda-health"</code></pre>
+
+        <h3>Respuesta esperada</h3>
+        <pre><code>{
+  "ok": true,
+  "service": "pda-webservices",
+  "env": {
+    "hasSupabaseUrl": true,
+    "hasServiceRoleKey": true
+  }
+}</code></pre>
+
+        <div class="note">
+          Si este endpoint responde <code>404</code>, el deploy activo no contiene el archivo
+          <code>api/pda-health.ts</code>. Si responde <code>500</code> con <code>ok: false</code>,
+          falta configurar alguna variable de entorno en Vercel.
         </div>
       </section>
 
@@ -459,8 +494,8 @@ https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
         </table>
 
         <pre><code>{
-  "username": "operario1",
-  "password": "clave123"
+  "username": "PMORA",
+  "password": "tu_clave"
 }</code></pre>
 
         <h3>Respuesta exitosa</h3>
@@ -468,12 +503,12 @@ https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
   "ok": true,
   "usuario": {
     "id": "uuid-usuario",
-    "nombre": "Juan Perez",
-    "username": "operario1",
+    "nombre": "Nombre del operario",
+    "username": "PMORA",
     "perfil": "OPERARIO",
     "sucursal": {
       "id": "uuid-sucursal",
-      "nombre": "Sucursal Norte"
+      "nombre": "Carondelet"
     },
     "isla": {
       "id": "uuid-isla",
@@ -484,12 +519,39 @@ https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
 }</code></pre>
 
         <h3>cURL</h3>
-        <pre><code>curl -X POST "https://tu-dominio.vercel.app/api/logeo_Operaciones" \
+        <pre><code>curl -X POST "https://sistema-gestion-pits.vercel.app/api/logeo_Operaciones" \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "operario1",
-    "password": "clave123"
+    "username": "PMORA",
+    "password": "tu_clave"
   }'</code></pre>
+
+        <h3>Postman</h3>
+        <table>
+          <tbody>
+            <tr>
+              <td><code>Method</code></td>
+              <td><code>POST</code></td>
+            </tr>
+            <tr>
+              <td><code>URL</code></td>
+              <td><code>https://sistema-gestion-pits.vercel.app/api/logeo_Operaciones</code></td>
+            </tr>
+            <tr>
+              <td><code>Headers</code></td>
+              <td><code>Content-Type: application/json</code></td>
+            </tr>
+            <tr>
+              <td><code>Body</code></td>
+              <td><code>raw</code> y formato <code>JSON</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note warning">
+          Si la respuesta es <code>{"ok":false,"error":"Metodo no permitido"}</code>, la solicitud
+          no llego como <code>POST</code>. Revisa el selector de metodo en Postman, que la URL sea
+          <code>/api/logeo_Operaciones</code> y que no estes probando <code>/api/pda-health</code>.
+        </div>
       </section>
 
       <section id="operacion">
@@ -693,6 +755,11 @@ https://tu-dominio.vercel.app/api/operacion-isla</code></pre>
               <td><code>404</code></td>
               <td>No se encontro OT o tarea.</td>
               <td><code>OT no encontrada</code></td>
+            </tr>
+            <tr>
+              <td><code>405</code></td>
+              <td>Metodo HTTP incorrecto para el endpoint.</td>
+              <td><code>Metodo no permitido</code></td>
             </tr>
             <tr>
               <td><code>409</code></td>

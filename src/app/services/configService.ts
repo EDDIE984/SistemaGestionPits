@@ -17,6 +17,13 @@ export interface IslaOption {
   sucursal_id?: string;
 }
 
+export interface TecnicoOption {
+  id: string;
+  nombre: string;
+  sucursal_id: string;
+  isla_principal_id: string | null;
+}
+
 export async function fetchSucursales(): Promise<SucursalOption[]> {
   const { data, error } = await supabase
     .from('sucursales')
@@ -56,4 +63,28 @@ export async function fetchAllIslas(): Promise<IslaOption[]> {
     .order('nombre');
   if (error) throw error;
   return (data ?? []) as IslaOption[];
+}
+
+export async function fetchTecnicosByIsla(sucursalId: string, islaId: string): Promise<TecnicoOption[]> {
+  const { data, error } = await supabase
+    .from('tecnicos')
+    .select('id, sucursal_id, isla_principal_id, usuarios(nombre)')
+    .eq('sucursal_id', sucursalId)
+    .eq('isla_principal_id', islaId)
+    .eq('activo', true);
+  if (error) throw error;
+
+  return ((data ?? []) as Array<{
+    id: string;
+    sucursal_id: string;
+    isla_principal_id: string | null;
+    usuarios?: { nombre?: string | null } | null;
+  }>)
+    .map((row) => ({
+      id: row.id,
+      nombre: row.usuarios?.nombre ?? row.id,
+      sucursal_id: row.sucursal_id,
+      isla_principal_id: row.isla_principal_id,
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }

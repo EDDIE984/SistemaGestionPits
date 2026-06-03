@@ -16,8 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/ta
 import { Textarea } from '@/app/components/ui/textarea';
 import { orderFlow } from '@/app/data/mockData';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
-import { fetchIslas } from '@/app/services/configService';
-import type { IslaOption } from '@/app/services/configService';
+import { fetchIslas, fetchTecnicosByIsla } from '@/app/services/configService';
+import type { IslaOption, TecnicoOption } from '@/app/services/configService';
 import { deleteOrderPhoto, fetchOrderPhotos, uploadOrderPhotos } from '@/app/services/orderPhotosService';
 import {
   deleteMockOrder,
@@ -78,6 +78,7 @@ const initialForms: Record<OrderStatus, StepForm> = {
   PLANIFICACION_REPARACION: {
     isla: 'Enderezada',
     operacion: '',
+    tecnico_id: '',
     tecnico: '',
     tiempo_estandar_horas: '1',
     tarifa_hora: '25',
@@ -144,6 +145,7 @@ export function OrderDetailPage() {
   const [photoError, setPhotoError] = useState('');
   const [selectedPhoto, setSelectedPhoto] = useState<OrderPhotoAttachment | null>(null);
   const [planningIslas, setPlanningIslas] = useState<IslaOption[]>([]);
+  const [planningTecnicos, setPlanningTecnicos] = useState<TecnicoOption[]>([]);
 
   useEffect(() => {
     if (order && process) {
@@ -177,6 +179,30 @@ export function OrderDetailPage() {
       return exists ? current : { ...current, isla: planningIslas[0].nombre };
     });
   }, [order?.estado, planningIslas]);
+
+  useEffect(() => {
+    if (order?.estado !== 'PLANIFICACION_REPARACION' || !order.sucursal_id) {
+      setPlanningTecnicos([]);
+      return;
+    }
+
+    const selectedIsla = planningIslas.find((isla) => isla.nombre === String(form.isla || ''));
+    if (!selectedIsla) {
+      setPlanningTecnicos([]);
+      return;
+    }
+
+    fetchTecnicosByIsla(order.sucursal_id, selectedIsla.id)
+      .then((tecnicos) => {
+        setPlanningTecnicos(tecnicos);
+        setForm((current) => {
+          const currentTecnicoId = String(current.tecnico_id || '');
+          const isValid = tecnicos.some((tecnico) => tecnico.id === currentTecnicoId);
+          return isValid ? current : { ...current, tecnico_id: '', tecnico: '' };
+        });
+      })
+      .catch(() => setPlanningTecnicos([]));
+  }, [form.isla, order?.estado, order?.sucursal_id, planningIslas]);
 
   useEffect(() => {
     if (location.hash !== '#flujograma') return;
@@ -428,6 +454,7 @@ export function OrderDetailPage() {
                   activeProformaTab={activeProformaTab}
                   onProformaTabChange={setActiveProformaTab}
                   planningIslas={planningIslas}
+                  planningTecnicos={planningTecnicos}
                 />
 
                 {isIslandControlledStatus(order.estado) ? null : (
@@ -682,6 +709,7 @@ function formFromProcess(status: OrderStatus, process: MockOrderProcess, tipo_cl
         ...initialForms.PLANIFICACION_REPARACION,
         isla: last.isla,
         operacion: last.operacion,
+        tecnico_id: last.tecnico_id ?? '',
         tecnico: last.tecnico,
         tiempo_estandar_horas: String(last.tiempo_estandar_horas || ''),
         tarifa_hora: String(last.tarifa_hora || ''),
@@ -776,6 +804,7 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
     const nextTask = {
       isla: String(form.isla || 'Enderezada'),
       operacion,
+      tecnico_id: String(form.tecnico_id || ''),
       tecnico: String(form.tecnico || ''),
       tiempo_estandar_horas: Number(form.tiempo_estandar_horas || 0),
       tarifa_hora: Number(form.tarifa_hora || 0),
@@ -992,6 +1021,7 @@ interface StepFieldsProps {
   activeProformaTab: 'piezas' | 'aprobacion' | 'repuestos';
   onProformaTabChange: (tab: 'piezas' | 'aprobacion' | 'repuestos') => void;
   planningIslas: IslaOption[];
+  planningTecnicos: TecnicoOption[];
 }
 
 function StepFields({
@@ -1007,6 +1037,7 @@ function StepFields({
   activeProformaTab,
   onProformaTabChange,
   planningIslas,
+  planningTecnicos,
 }: StepFieldsProps) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
     const hasProformaRecords = process.proforma.length > 0 || process.aseguradora.id || process.repuestos.length > 0;
@@ -1196,6 +1227,17 @@ function StepFields({
   if (status === 'PLANIFICACION_REPARACION') {
     const costo = Number(form.tiempo_estandar_horas || 0) * Number(form.tarifa_hora || 0);
     const islandOptions = planningIslas.map((isla) => ({ value: isla.nombre, label: isla.nombre }));
+    const tecnicoOptions = planningTecnicos.map((tecnico) => ({ value: tecnico.id, label: tecnico.nombre }));
+    const handleIslandChange = (value: string) => {
+      onChange('isla', value);
+      onChange('tecnico_id', '');
+      onChange('tecnico', '');
+    };
+    const handleTecnicoChange = (value: string) => {
+      const selectedTecnico = planningTecnicos.find((tecnico) => tecnico.id === value);
+      onChange('tecnico_id', value);
+      onChange('tecnico', selectedTecnico?.nombre ?? '');
+    };
     return (
       <div className="space-y-4">
         {planningIslas.length === 0 ? (
@@ -1204,9 +1246,9 @@ function StepFields({
           </div>
         ) : null}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <SelectField label="Isla" value={String(form.isla)} onChange={(value) => onChange('isla', value)} options={islandOptions} disabled={planningIslas.length === 0} />
+          <SelectField label="Isla" value={String(form.isla)} onChange={handleIslandChange} options={islandOptions} disabled={planningIslas.length === 0} />
           <Field label="Operacion" value={String(form.operacion)} onChange={(value) => onChange('operacion', value)} placeholder="Enderezada de panel lateral" />
-          <Field label="Tecnico" value={String(form.tecnico)} onChange={(value) => onChange('tecnico', value)} placeholder="Carlos Enderezada" />
+          <SelectField label="Tecnico" value={String(form.tecnico_id || '')} onChange={handleTecnicoChange} options={tecnicoOptions} disabled={planningTecnicos.length === 0} placeholder={planningTecnicos.length === 0 ? 'Sin tecnicos para esta isla' : 'Seleccionar tecnico'} />
           <Field label="Tiempo estandar horas" type="number" value={String(form.tiempo_estandar_horas)} onChange={(value) => onChange('tiempo_estandar_horas', value)} />
           <Field label="Tarifa hora" type="number" value={String(form.tarifa_hora)} onChange={(value) => onChange('tarifa_hora', value)} />
           <Field label="Costo estimado" value={formatMoney(costo)} onChange={() => undefined} disabled />
@@ -1341,19 +1383,21 @@ function SelectField({
   onChange,
   options,
   disabled,
+  placeholder = 'Seleccionar',
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<string | { value: string; label: string }>;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
       <Select value={value} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger disabled={disabled}>
-          <SelectValue />
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => {

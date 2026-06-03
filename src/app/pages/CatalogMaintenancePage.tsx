@@ -33,6 +33,7 @@ interface FieldConfig {
   type: FieldType;
   required?: boolean;
   lookup?: string;
+  showForRole?: string;
 }
 
 interface ColumnConfig {
@@ -56,6 +57,8 @@ interface CatalogConfig {
 interface LookupOption {
   id: string;
   label: string;
+  sucursal_id?: string | null;
+  activo?: boolean | null;
 }
 
 const NONE_VALUE = '__none__';
@@ -168,13 +171,14 @@ const catalogConfigs: Record<string, CatalogConfig> = {
     slug: 'usuarios',
     table: 'usuarios',
     title: 'Usuarios',
-    description: 'Accesos, roles y sucursal asignada.',
-    select: '*, sucursales(nombre), roles(nombre)',
+    description: 'Accesos, roles, sucursal e isla asignada.',
+    select: '*, sucursales(nombre), roles(nombre), islas(nombre)',
     orderBy: 'nombre',
     activeField: 'activo',
     fields: [
       { key: 'sucursal_id', label: 'Sucursal', type: 'select', lookup: 'sucursales', required: true },
       { key: 'rol_id', label: 'Rol', type: 'select', lookup: 'roles', required: true },
+      { key: 'isla_id', label: 'Isla', type: 'select', lookup: 'islas', showForRole: 'OPERARIO' },
       { key: 'nombre', label: 'Nombre', type: 'text', required: true },
       { key: 'username', label: 'Usuario', type: 'text', required: true },
       { key: 'password_hash', label: 'Contrasena', type: 'password' },
@@ -186,6 +190,7 @@ const catalogConfigs: Record<string, CatalogConfig> = {
       { key: 'username', label: 'Usuario' },
       { key: 'rol', label: 'Rol', render: (row) => getNestedLabel(row, 'roles.nombre') },
       { key: 'sucursal', label: 'Sucursal', render: (row) => getNestedLabel(row, 'sucursales.nombre') },
+      { key: 'isla', label: 'Isla', render: (row) => getNestedLabel(row, 'islas.nombre') },
       { key: 'activo', label: 'Estado', render: (row) => formatBoolean(row.activo) },
     ],
   },
@@ -242,7 +247,7 @@ const catalogConfigs: Record<string, CatalogConfig> = {
 const lookupQueries: Record<string, { table: string; select: string; orderBy: string; map: (row: CatalogRow) => string }> = {
   companias: { table: 'companias', select: 'id, nombre', orderBy: 'nombre', map: (row) => row.nombre },
   sucursales: { table: 'sucursales', select: 'id, nombre, ciudad', orderBy: 'nombre', map: (row) => `${row.nombre}${row.ciudad ? ` - ${row.ciudad}` : ''}` },
-  islas: { table: 'islas', select: 'id, nombre', orderBy: 'nombre', map: (row) => row.nombre },
+  islas: { table: 'islas', select: 'id, nombre, sucursal_id, activo', orderBy: 'nombre', map: (row) => row.nombre },
   roles: { table: 'roles', select: 'id, nombre', orderBy: 'nombre', map: (row) => row.nombre },
   tecnicos: { table: 'tecnicos', select: 'id, usuarios(nombre)', orderBy: 'id', map: (row) => row.usuarios?.nombre ?? row.id },
 };
@@ -268,12 +273,17 @@ async function saveUser(formData: CatalogRow, currentRow: CatalogRow | null) {
     p_id: currentRow?.id ?? null,
     p_sucursal_id: formData.sucursal_id,
     p_rol_id: formData.rol_id,
+    p_isla_id: formData.isla_id || null,
     p_nombre: formData.nombre,
     p_username: formData.username,
     p_password: formData.password_hash || null,
     p_email: formData.email || null,
     p_activo: formData.activo ?? true,
   });
+}
+
+function getRoleName(formData: CatalogRow, lookups: Record<string, LookupOption[]>) {
+  return lookups.roles?.find((role) => role.id === formData.rol_id)?.label;
 }
 
 function getDefaultFormData(config: CatalogConfig) {
@@ -322,7 +332,12 @@ export function CatalogMaintenancePage() {
         const query = lookupQueries[key];
         if (!query) return [key, []] as const;
         const { data, error } = await supabase.from(query.table).select(query.select).order(query.orderBy);
-        return [key, error ? [] : (data ?? []).map((row) => ({ id: row.id, label: query.map(row) }))] as const;
+        return [key, error ? [] : (data ?? []).map((row) => ({
+          id: row.id,
+          label: query.map(row),
+          sucursal_id: row.sucursal_id ?? null,
+          activo: row.activo ?? null,
+        }))] as const;
       }),
     );
     setLookups(Object.fromEntries(lookupEntries));
@@ -339,6 +354,32 @@ export function CatalogMaintenancePage() {
     return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query));
   }, [rows, searchTerm]);
 
+  const selectedRoleName = getRoleName(formData, lookups);
+  const isOperarioUserForm = config?.slug === 'usuarios' && selectedRoleName === 'OPERARIO';
+  const visibleFields = useMemo(() => (
+    config?.fields.filter((field) => !field.showForRole || field.showForRole === selectedRoleName) ?? []
+  ), [config, selectedRoleName]);
+
+  const getFieldOptions = (field: FieldConfig) => {
+    const options = lookups[field.lookup ?? ''] ?? [];
+    if (config?.slug === 'usuarios' && field.key === 'isla_id') {
+      return options.filter((option) => option.sucursal_id === formData.sucursal_id && option.activo !== false);
+    }
+    return options;
+  };
+
+  const updateFormField = (key: string, value: unknown) => {
+    setFormData((current) => {
+      const next = { ...current, [key]: value };
+      if (config?.slug === 'usuarios' && key === 'sucursal_id') next.isla_id = null;
+      if (config?.slug === 'usuarios' && key === 'rol_id') {
+        const nextRole = lookups.roles?.find((role) => role.id === value)?.label;
+        if (nextRole !== 'OPERARIO') next.isla_id = null;
+      }
+      return next;
+    });
+  };
+
   const openCreateDialog = () => {
     if (!config) return;
     setCurrentRow(null);
@@ -354,9 +395,13 @@ export function CatalogMaintenancePage() {
 
   const handleSubmit = async () => {
     if (!config) return;
-    const missingField = config.fields.find((field) => field.required && !formData[field.key]);
+    const missingField = visibleFields.find((field) => field.required && !formData[field.key]);
     if (missingField) {
       toast.error(`Completa el campo ${missingField.label}`);
+      return;
+    }
+    if (isOperarioUserForm && !formData.isla_id) {
+      toast.error('Completa el campo Isla');
       return;
     }
     if (config.slug === 'usuarios' && !currentRow && !formData.password_hash) {
@@ -515,34 +560,36 @@ export function CatalogMaintenancePage() {
             <DialogDescription>Completa los datos del registro.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
-            {config.fields.map((field) => (
+            {visibleFields.map((field) => (
               <div key={field.key} className={field.type === 'textarea' ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
-                <Label htmlFor={field.key}>{field.label}{field.required ? ' *' : ''}</Label>
+                <Label htmlFor={field.key}>
+                  {field.label}{field.required || (field.key === 'isla_id' && isOperarioUserForm) ? ' *' : ''}
+                </Label>
                 {field.type === 'textarea' ? (
                   <Textarea
                     id={field.key}
                     value={formData[field.key] ?? ''}
-                    onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
+                    onChange={(event) => updateFormField(field.key, event.target.value)}
                   />
                 ) : field.type === 'boolean' ? (
                   <div className="flex h-9 items-center">
                     <Switch
                       id={field.key}
                       checked={Boolean(formData[field.key])}
-                      onCheckedChange={(checked) => setFormData((current) => ({ ...current, [field.key]: checked }))}
+                      onCheckedChange={(checked) => updateFormField(field.key, checked)}
                     />
                   </div>
                 ) : field.type === 'select' ? (
                   <Select
                     value={formData[field.key] ?? NONE_VALUE}
-                    onValueChange={(value) => setFormData((current) => ({ ...current, [field.key]: value === NONE_VALUE ? null : value }))}
+                    onValueChange={(value) => updateFormField(field.key, value === NONE_VALUE ? null : value)}
                   >
                     <SelectTrigger id={field.key}>
                       <SelectValue placeholder="Seleccionar" />
                     </SelectTrigger>
                     <SelectContent>
                       {!field.required && <SelectItem value={NONE_VALUE}>Sin asignar</SelectItem>}
-                      {(lookups[field.lookup ?? ''] ?? []).map((option) => (
+                      {getFieldOptions(field).map((option) => (
                         <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -553,7 +600,7 @@ export function CatalogMaintenancePage() {
                     type={field.type === 'password' ? 'password' : field.type}
                     step={field.type === 'number' ? '0.01' : undefined}
                     value={formData[field.key] ?? ''}
-                    onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
+                    onChange={(event) => updateFormField(field.key, event.target.value)}
                   />
                 )}
               </div>

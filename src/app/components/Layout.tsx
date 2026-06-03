@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from 'react-router';
+import { Link, Navigate, Outlet, useLocation } from 'react-router';
 import {
   BarChart3,
   Bell,
@@ -21,12 +21,18 @@ export function Layout() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const isOperario = user?.rol === 'OPERARIO';
+  const operarioAllowedPaths = ['/pantalla-taller', '/islas'];
+
+  if (isOperario && !operarioAllowedPaths.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`))) {
+    return <Navigate to="/pantalla-taller" replace />;
+  }
 
   const allMenuItems = [
     { path: '/', label: 'Dashboard', icon: Gauge },
     { path: '/ordenes', label: 'Ordenes', icon: ClipboardList },
     { path: '/ordenes/nueva', label: 'Nueva orden', icon: PlusCircle },
-    { path: '/islas', label: 'Islas', icon: Wrench },
+    { path: '/islas', label: 'Operacion por isla', icon: Wrench },
     { path: '/modificaciones', label: 'Modificaciones', icon: SlidersHorizontal },
     { path: '/pantalla-taller', label: 'Pantalla taller', icon: Monitor },
     { path: '/gantt', label: 'Gantt', icon: CalendarDays },
@@ -36,7 +42,11 @@ export function Layout() {
   ];
 
   const menuItems = allMenuItems.filter(
-    (item) => !item.roles || (user?.rol && item.roles.includes(user.rol))
+    (item) => (
+      isOperario
+        ? operarioAllowedPaths.includes(item.path)
+        : (!item.roles || (user?.rol && item.roles.includes(user.rol)))
+    )
   );
 
   return (

@@ -21,9 +21,11 @@ export function IslandBoardPage() {
   const [islas, setIslas] = useState<IslaOption[]>([]);
   const [isLoadingIslas, setIsLoadingIslas] = useState(true);
   const [selectedIslaId, setSelectedIslaId] = useState(ALL_VALUE);
+  const isOperario = sucursalScope.user?.rol === 'OPERARIO';
+  const assignedIslaId = sucursalScope.user?.isla_id;
 
   useEffect(() => {
-    setSelectedIslaId(ALL_VALUE);
+    setSelectedIslaId(isOperario && assignedIslaId ? assignedIslaId : ALL_VALUE);
     setIsLoadingIslas(true);
 
     if (sucursalScope.effectiveSucursalId === ALL_SUCURSALES) {
@@ -44,11 +46,15 @@ export function IslandBoardPage() {
       .then(setIslas)
       .catch(() => setIslas([]))
       .finally(() => setIsLoadingIslas(false));
-  }, [sucursalScope.effectiveSucursalId]);
+  }, [assignedIslaId, isOperario, sucursalScope.effectiveSucursalId]);
 
   const selectedIsla = useMemo(
     () => islas.find((isla) => isla.id === selectedIslaId),
     [islas, selectedIslaId],
+  );
+  const assignedIslaName = sucursalScope.user?.isla_nombre ?? islas.find((isla) => isla.id === assignedIslaId)?.nombre ?? '';
+  const isOperarioTask = (task: { isla_id?: string; isla?: string }) => (
+    Boolean(assignedIslaId && task.isla_id === assignedIslaId) || Boolean(assignedIslaName && task.isla === assignedIslaName)
   );
 
   const tasks = useMemo(() => orders
@@ -69,13 +75,19 @@ export function IslandBoardPage() {
         vehiculo: `${order.marca} ${order.modelo}`,
       }));
     })
-    .filter((task) => selectedIslaId === ALL_VALUE || task.isla === selectedIsla?.nombre), [orders, processes, selectedIsla?.nombre, selectedIslaId, sucursalScope.effectiveSucursalId]);
+    .filter((task) => {
+      if (isOperario) return isOperarioTask(task);
+      return selectedIslaId === ALL_VALUE || task.isla_id === selectedIslaId || task.isla === selectedIsla?.nombre;
+    }), [assignedIslaId, assignedIslaName, isOperario, orders, processes, selectedIsla?.nombre, selectedIslaId, sucursalScope.effectiveSucursalId]);
 
   const islandsToDisplay = useMemo(() => {
     const byName = new Map<string, { id: string; nombre: string }>();
 
     islas
-      .filter((isla) => selectedIslaId === ALL_VALUE || isla.id === selectedIslaId)
+      .filter((isla) => {
+        if (isOperario) return isla.id === assignedIslaId;
+        return selectedIslaId === ALL_VALUE || isla.id === selectedIslaId;
+      })
       .forEach((isla) => {
       byName.set(isla.nombre, isla);
     });
@@ -86,8 +98,12 @@ export function IslandBoardPage() {
       }
     });
 
+    if (isOperario && assignedIslaId && assignedIslaName && !byName.has(assignedIslaName)) {
+      byName.set(assignedIslaName, { id: assignedIslaId, nombre: assignedIslaName });
+    }
+
     return Array.from(byName.values());
-  }, [islas, selectedIslaId, tasks]);
+  }, [assignedIslaId, assignedIslaName, isOperario, islas, selectedIslaId, tasks]);
 
   const tasksByIsland = useMemo(() => {
     const groups = new Map<string, typeof tasks>();
@@ -119,17 +135,24 @@ export function IslandBoardPage() {
             onSucursalChange={sucursalScope.setSelectedSucursalId}
           />
 
-          <Select value={selectedIslaId} onValueChange={setSelectedIslaId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Isla" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>Todas las islas</SelectItem>
-              {islas.map((isla) => (
-                <SelectItem key={isla.id} value={isla.id}>{isla.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {isOperario ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase text-gray-500">Isla asignada</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{assignedIslaName || 'Sin isla asignada'}</p>
+            </div>
+          ) : (
+            <Select value={selectedIslaId} onValueChange={setSelectedIslaId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Isla" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VALUE}>Todas las islas</SelectItem>
+                {islas.map((isla) => (
+                  <SelectItem key={isla.id} value={isla.id}>{isla.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </CardContent>
       </Card>
 

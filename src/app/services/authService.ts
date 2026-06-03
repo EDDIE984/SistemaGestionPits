@@ -16,6 +16,8 @@ export async function validateAndLogin(username: string, password: string): Prom
     rol: string;
     sucursal_id: string;
     sucursal_nombre: string;
+    isla_id?: string | null;
+    isla_nombre?: string | null;
   }[])[0];
 
   return {
@@ -25,5 +27,7 @@ export async function validateAndLogin(username: string, password: string): Prom
     rol: row.rol as RoleName,
     sucursal_id: row.sucursal_id,
     sucursal_nombre: row.sucursal_nombre,
+    isla_id: row.isla_id ?? undefined,
+    isla_nombre: row.isla_nombre ?? undefined,
   };
 }

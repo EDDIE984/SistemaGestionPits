@@ -126,7 +126,9 @@ export interface OrderProcess {
   tareas: Array<{
     id?: string;
     isla: string;
+    isla_id?: string;
     operacion: string;
+    tecnico_id?: string;
     tecnico: string;
     tiempo_estandar_horas: number;
     tarifa_hora: number;
@@ -138,6 +140,7 @@ export interface OrderProcess {
     motivo_ajuste?: string;
     eventos?: Array<{
       accion: 'INICIAR' | 'PAUSAR' | 'REANUDAR' | 'FINALIZAR';
+      tecnico_id?: string;
       fecha_hora: string;
       estado_resultante: TaskStatus;
       observacion: string;

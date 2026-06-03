@@ -267,7 +267,7 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
     supabase.from('orden_repuestos').select('*').eq('orden_id', orderId).order('created_at'),
     supabase
       .from('orden_isla_tareas')
-      .select('*, islas!inner(nombre), orden_isla_tarea_eventos(accion, estado_resultante, fecha_hora, observacion)')
+      .select('*, islas!inner(nombre), orden_isla_tarea_eventos(accion, tecnico_id, estado_resultante, fecha_hora, observacion)')
       .eq('orden_id', orderId)
       .order('created_at'),
     supabase
@@ -300,9 +300,9 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
     estado: string; proveedor: string | null; fecha_estimada_llegada: string | null;
     fecha_real_llegada: string | null; costo: number | null; observaciones: string | null;
   };
-  type EventoRow = { accion: string; estado_resultante: string; fecha_hora: string; observacion: string | null };
+  type EventoRow = { accion: string; tecnico_id: string | null; estado_resultante: string; fecha_hora: string; observacion: string | null };
   type TareaRow = {
-    id: string; operacion_nombre: string | null; tecnico_nombre: string | null;
+    id: string; isla_id: string; tecnico_id: string | null; operacion_nombre: string | null; tecnico_nombre: string | null;
     tiempo_estandar_ajustado: number; tarifa_hora_aplicada: number;
     fecha_inicio_planificada: string; fecha_fin_planificada: string;
     estado: string; fecha_inicio_real: string | null; fecha_fin_real: string | null;
@@ -355,6 +355,8 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
     tareas: ((tareasResult.data ?? []) as TareaRow[]).map((t) => ({
       id: t.id,
       isla: t.islas?.nombre ?? '',
+      isla_id: t.isla_id,
+      tecnico_id: t.tecnico_id ?? undefined,
       operacion: t.operacion_nombre ?? '',
       tecnico: t.tecnico_nombre ?? '',
       tiempo_estandar_horas: Number(t.tiempo_estandar_ajustado),
@@ -367,6 +369,7 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
       motivo_ajuste: t.motivo_ajuste ?? undefined,
       eventos: (t.orden_isla_tarea_eventos ?? []).map((e) => ({
         accion: e.accion as 'INICIAR' | 'PAUSAR' | 'REANUDAR' | 'FINALIZAR',
+        tecnico_id: e.tecnico_id ?? undefined,
         fecha_hora: e.fecha_hora,
         estado_resultante: e.estado_resultante as 'PENDIENTE' | 'EN_PROCESO' | 'PAUSADA' | 'COMPLETADA',
         observacion: e.observacion ?? '',
@@ -463,6 +466,7 @@ export async function saveOrderStep(
         const payload = {
           isla_id: islaId,
           operacion_nombre: task.operacion || null,
+          tecnico_id: task.tecnico_id || null,
           tecnico_nombre: task.tecnico || null,
           tiempo_estandar_original: task.tiempo_estandar_horas,
           tiempo_estandar_ajustado: task.tiempo_estandar_horas,
@@ -566,13 +570,20 @@ export async function executeIslandTask(
 
   const { data: current } = await supabase
     .from('orden_isla_tareas')
-    .select('estado, fecha_inicio_real, fecha_fin_real')
+    .select('estado, fecha_inicio_real, fecha_fin_real, tecnico_id')
     .eq('id', tareaId)
     .single();
 
   if (!current) return;
 
-  const currentState = (current as { estado: string; fecha_inicio_real: string | null; fecha_fin_real: string | null });
+  const currentState = (current as { estado: string; fecha_inicio_real: string | null; fecha_fin_real: string | null; tecnico_id: string | null });
+  const { data: sessionTecnico } = await supabase
+    .from('tecnicos')
+    .select('id')
+    .eq('usuario_id', session.id)
+    .eq('activo', true)
+    .maybeSingle();
+  const eventTecnicoId = (sessionTecnico as { id?: string } | null)?.id ?? currentState.tecnico_id;
   const isPaused = currentState.estado === 'PAUSADA';
   const isCompleted = currentState.estado === 'COMPLETADA' || Boolean(currentState.fecha_fin_real);
   if (isCompleted) return;
@@ -586,6 +597,9 @@ export async function executeIslandTask(
     action === 'PAUSAR' ? 'PAUSADA' : 'COMPLETADA';
 
   const updateData: Record<string, unknown> = { estado: newEstado };
+  if (!currentState.tecnico_id && eventTecnicoId) {
+    updateData['tecnico_id'] = eventTecnicoId;
+  }
   if (action === 'INICIAR' && !currentState.fecha_inicio_real) {
     updateData['fecha_inicio_real'] = now;
   }
@@ -598,6 +612,7 @@ export async function executeIslandTask(
   await supabase.from('orden_isla_tarea_eventos').insert({
     tarea_id: tareaId,
     usuario_id: session.id,
+    tecnico_id: eventTecnicoId ?? null,
     accion: eventAction,
     estado_resultante: newEstado,
     fecha_hora: now,
@@ -629,6 +644,7 @@ export async function executeIslandTask(
 export async function modifyIslandTask(
   tareaId: string,
   changes: {
+    tecnico_id: string;
     tecnico: string;
     tiempo_estandar_horas: number;
     tarifa_hora: number;
@@ -639,6 +655,7 @@ export async function modifyIslandTask(
   }
 ): Promise<void> {
   await supabase.from('orden_isla_tareas').update({
+    tecnico_id: changes.tecnico_id || null,
     tecnico_nombre: changes.tecnico || null,
     tiempo_estandar_ajustado: changes.tiempo_estandar_horas,
     tarifa_hora_aplicada: changes.tarifa_hora,

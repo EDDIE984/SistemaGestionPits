@@ -6,12 +6,16 @@ import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Textarea } from '@/app/components/ui/textarea';
 import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime, formatMoney } from '@/app/lib/format';
+import { fetchTecnicosByIsla } from '@/app/services/configService';
+import type { TecnicoOption } from '@/app/services/configService';
 import { modifyMockIslandTask, useMockOrderProcesses, useMockOrders } from '@/app/store/mockOrders';
 
 interface ModificationForm {
+  tecnico_id: string;
   tecnico: string;
   tiempo_estandar_horas: string;
   tarifa_hora: string;
@@ -42,6 +46,7 @@ export function ModificationsPage() {
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const selectedTask = tasks.find((task) => task.id === selectedTaskId);
   const [form, setForm] = useState<ModificationForm>({
+    tecnico_id: '',
     tecnico: '',
     tiempo_estandar_horas: '',
     tarifa_hora: '',
@@ -50,6 +55,7 @@ export function ModificationsPage() {
     motivo_ajuste: '',
     observaciones: '',
   });
+  const [tecnicos, setTecnicos] = useState<TecnicoOption[]>([]);
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
@@ -62,6 +68,7 @@ export function ModificationsPage() {
     if (!selectedTask) return;
 
     setForm({
+      tecnico_id: selectedTask.tecnico_id || '',
       tecnico: selectedTask.tecnico || '',
       tiempo_estandar_horas: String(selectedTask.tiempo_estandar_horas || ''),
       tarifa_hora: String(selectedTask.tarifa_hora || ''),
@@ -72,6 +79,28 @@ export function ModificationsPage() {
     });
   }, [selectedTaskId]);
 
+  useEffect(() => {
+    if (!selectedTask?.sucursal_id || !selectedTask.isla_id) {
+      setTecnicos([]);
+      setForm((current) => ({ ...current, tecnico_id: '', tecnico: '' }));
+      return;
+    }
+
+    fetchTecnicosByIsla(selectedTask.sucursal_id, selectedTask.isla_id)
+      .then((options) => {
+        setTecnicos(options);
+        setForm((current) => {
+          const currentTecnicoId = String(current.tecnico_id || '');
+          const isValid = options.some((tecnico) => tecnico.id === currentTecnicoId);
+          return isValid ? current : { ...current, tecnico_id: '', tecnico: '' };
+        });
+      })
+      .catch(() => {
+        setTecnicos([]);
+        setForm((current) => ({ ...current, tecnico_id: '', tecnico: '' }));
+      });
+  }, [selectedTask?.id, selectedTask?.isla_id, selectedTask?.sucursal_id]);
+
   const updateField = (field: keyof ModificationForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
@@ -80,6 +109,7 @@ export function ModificationsPage() {
     if (!selectedTask?.id) return;
 
     await modifyMockIslandTask(selectedTask.orden_id, selectedTask.id, {
+      tecnico_id: form.tecnico_id,
       tecnico: form.tecnico,
       tiempo_estandar_horas: Number(form.tiempo_estandar_horas || 0),
       tarifa_hora: Number(form.tarifa_hora || 0),
@@ -93,6 +123,14 @@ export function ModificationsPage() {
   };
 
   const estimatedCost = Number(form.tiempo_estandar_horas || 0) * Number(form.tarifa_hora || 0);
+  const updateTecnico = (tecnicoId: string) => {
+    const selectedTecnico = tecnicos.find((tecnico) => tecnico.id === tecnicoId);
+    setForm((current) => ({
+      ...current,
+      tecnico_id: tecnicoId,
+      tecnico: selectedTecnico?.nombre ?? '',
+    }));
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -166,7 +204,14 @@ export function ModificationsPage() {
               ) : null}
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field label="Tecnico" value={form.tecnico} onChange={(value) => updateField('tecnico', value)} />
+                <SelectField
+                  label="Tecnico"
+                  value={form.tecnico_id}
+                  onChange={updateTecnico}
+                  options={tecnicos.map((tecnico) => ({ value: tecnico.id, label: tecnico.nombre }))}
+                  disabled={tecnicos.length === 0}
+                  placeholder={tecnicos.length === 0 ? 'Sin tecnicos para esta isla' : 'Seleccionar tecnico'}
+                />
                 <Field label="Tiempo estandar horas" type="number" value={form.tiempo_estandar_horas} onChange={(value) => updateField('tiempo_estandar_horas', value)} />
                 <Field label="Tarifa hora" type="number" value={form.tarifa_hora} onChange={(value) => updateField('tarifa_hora', value)} />
                 <Field label="Costo estimado" value={formatMoney(estimatedCost)} onChange={() => undefined} disabled />
@@ -215,6 +260,40 @@ function Field({
     <div className="space-y-2">
       <Label>{label}</Label>
       <Input type={type} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  disabled,
+  placeholder = 'Seleccionar',
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger disabled={disabled}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

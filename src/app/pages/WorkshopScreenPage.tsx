@@ -22,6 +22,8 @@ export function WorkshopScreenPage() {
   const [selectedIsland, setSelectedIsland] = useState(ALL_ISLANDS);
   const [lastRefreshAt, setLastRefreshAt] = useState(() => new Date());
   const [islas, setIslas] = useState<IslaOption[]>([]);
+  const isOperario = sucursalScope.user?.rol === 'OPERARIO';
+  const assignedIslaId = sucursalScope.user?.isla_id;
 
   const refreshWorkshopScreen = () => {
     refreshOrders();
@@ -35,7 +37,7 @@ export function WorkshopScreenPage() {
   }, []);
 
   useEffect(() => {
-    setSelectedIsland(ALL_ISLANDS);
+    setSelectedIsland(isOperario && assignedIslaId ? assignedIslaId : ALL_ISLANDS);
 
     if (sucursalScope.effectiveSucursalId === ALL_SUCURSALES) {
       fetchAllIslas()
@@ -52,7 +54,12 @@ export function WorkshopScreenPage() {
     fetchIslas(sucursalScope.effectiveSucursalId)
       .then(setIslas)
       .catch(() => setIslas([]));
-  }, [sucursalScope.effectiveSucursalId]);
+  }, [assignedIslaId, isOperario, sucursalScope.effectiveSucursalId]);
+
+  const assignedIslaName = sucursalScope.user?.isla_nombre ?? islas.find((isla) => isla.id === assignedIslaId)?.nombre ?? '';
+  const isOperarioTask = (task: { isla_id?: string; isla?: string }) => (
+    Boolean(assignedIslaId && task.isla_id === assignedIslaId) || Boolean(assignedIslaName && task.isla === assignedIslaName)
+  );
 
   const tasks = useMemo(() => orders
     .filter((order) => (order.estado === 'INICIO_REPARACION' || order.estado === 'EN_PROCESO_ISLAS') && matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId))
@@ -67,14 +74,17 @@ export function WorkshopScreenPage() {
         vehiculo: `${order.marca} ${order.modelo}`,
         sucursal_id: order.sucursal_id,
       }));
-    }), [orders, processes, sucursalScope.effectiveSucursalId]);
+    })
+    .filter((task) => !isOperario || isOperarioTask(task)), [assignedIslaId, assignedIslaName, isOperario, orders, processes, sucursalScope.effectiveSucursalId]);
 
   const islandsWithTasks = useMemo(() => {
     const names = new Set(tasks.filter((task) => task.estado !== 'COMPLETADA').map((task) => task.isla).filter(Boolean));
     return Array.from(new Set(islas.map((isla) => isla.nombre))).filter((isla) => names.has(isla));
   }, [islas, tasks]);
   const selectedIslandName = islas.find((isla) => isla.id === selectedIsland)?.nombre;
-  const visibleIslands = selectedIsland === ALL_ISLANDS ? islandsWithTasks : islandsWithTasks.filter((isla) => isla === selectedIslandName);
+  const visibleIslands = isOperario
+    ? islandsWithTasks.filter((isla) => isla === assignedIslaName)
+    : selectedIsland === ALL_ISLANDS ? islandsWithTasks : islandsWithTasks.filter((isla) => isla === selectedIslandName);
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -99,20 +109,27 @@ export function WorkshopScreenPage() {
             selectedSucursalName={sucursalScope.selectedSucursalName}
             onSucursalChange={sucursalScope.setSelectedSucursalId}
           />
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-gray-700">Isla</p>
-            <Select value={selectedIsland} onValueChange={setSelectedIsland}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_ISLANDS}>Todas las islas</SelectItem>
-                {islas.map((isla) => (
-                  <SelectItem key={isla.id} value={isla.id}>{isla.nombre}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {isOperario ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase text-gray-500">Isla asignada</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{assignedIslaName || 'Sin isla asignada'}</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-gray-700">Isla</p>
+              <Select value={selectedIsland} onValueChange={setSelectedIsland}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_ISLANDS}>Todas las islas</SelectItem>
+                  {islas.map((isla) => (
+                    <SelectItem key={isla.id} value={isla.id}>{isla.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
             <p className="text-xs uppercase text-gray-500">Última actualización</p>
             <p className="mt-1 font-medium text-gray-900">{formatDateTime(lastRefreshAt.toISOString())}</p>

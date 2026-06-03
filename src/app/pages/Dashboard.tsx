@@ -1,4 +1,4 @@
-import { AlertTriangle, Car, CheckCircle2, Clock, DollarSign, ExternalLink, Gauge, Wrench } from 'lucide-react';
+import { Activity, AlertTriangle, Car, CheckCircle2, Clock, DollarSign, ExternalLink, Gauge, UserCheck, Wrench } from 'lucide-react';
 import { Link } from 'react-router';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { KpiCard } from '@/app/components/KpiCard';
@@ -31,6 +31,14 @@ export function Dashboard() {
     (total, task) => total + task.tiempo_estandar_horas * task.tarifa_hora,
     0
   );
+  const technicianPerformance = performanceByTechnician(allTasks);
+  const trackedTasks = allTasks.filter((task) => (task.eventos?.length ?? 0) > 0 || task.fecha_inicio_real);
+  const totalRealHours = allTasks.reduce((total, task) => total + taskRealHours(task), 0);
+  const totalPausedHours = allTasks.reduce((total, task) => total + taskPausedHours(task), 0);
+  const averageEfficiency = technicianPerformance.length === 0
+    ? 0
+    : Math.round(technicianPerformance.reduce((total, item) => total + item.eficiencia, 0) / technicianPerformance.length);
+  const topTechnicians = technicianPerformance.slice(0, 5);
 
   const cumplimiento = allTasks.length === 0
     ? 0
@@ -73,6 +81,12 @@ export function Dashboard() {
         <KpiCard title="Tareas atrasadas" value={String(delayedTasks.length)} detail="Requieren revision" icon={AlertTriangle} tone="red" />
         <KpiCard title="Cumplimiento" value={`${cumplimiento}%`} detail="Planificacion vs avance" icon={CheckCircle2} tone="green" />
         <KpiCard title="Costo estimado" value={formatMoney(estimatedCost)} detail="Mano de obra planificada" icon={DollarSign} tone="orange" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <KpiCard title="Tecnicos activos" value={String(technicianPerformance.length)} detail="Con tareas asignadas" icon={UserCheck} tone="blue" />
+        <KpiCard title="Horas reales" value={`${roundOne(totalRealHours)}h`} detail={`${trackedTasks.length} tarea(s) con registro`} icon={Activity} tone="green" />
+        <KpiCard title="Eficiencia promedio" value={`${averageEfficiency}%`} detail={`${roundOne(totalPausedHours)}h pausadas`} icon={Clock} tone="orange" />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
@@ -132,6 +146,64 @@ export function Dashboard() {
         </Card>
       </div>
 
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-blue-600" />
+              Desempeno por tecnico
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {topTechnicians.length === 0 ? (
+              <p className="text-sm text-gray-500">Sin tecnicos asignados.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={310}>
+                <BarChart data={topTechnicians}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="tecnico" tick={{ fontSize: 12 }} />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="horasPlanificadas" name="Planificadas" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="horasReales" name="Reales" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-blue-600" />
+              Tecnicos destacados
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {topTechnicians.length === 0 ? (
+              <p className="text-sm text-gray-500">Sin datos de desempeno.</p>
+            ) : (
+              topTechnicians.map((item) => (
+                <div key={item.tecnico} className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-gray-900">{item.tecnico}</p>
+                      <p className="mt-1 text-sm text-gray-600">{item.tareas} tarea(s) · {item.completadas} completada(s)</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.eficiencia >= 100 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {item.eficiencia}%
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm text-gray-500">
+                    Real: {item.horasReales.toFixed(1)}h · Pausa: {item.horasPausadas.toFixed(1)}h · Atraso: {item.horasAtraso.toFixed(1)}h
+                  </p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>Ordenes recientes</CardTitle>
@@ -180,4 +252,135 @@ export function Dashboard() {
       </Card>
     </div>
   );
+}
+
+type DashboardTask = {
+  tecnico?: string;
+  tiempo_estandar_horas: number;
+  fecha_fin_planificada?: string;
+  fecha_inicio_real?: string;
+  fecha_fin_real?: string;
+  estado?: string;
+  eventos?: Array<{ accion: 'INICIAR' | 'PAUSAR' | 'REANUDAR' | 'FINALIZAR'; fecha_hora: string }>;
+};
+
+function performanceByTechnician(tasks: DashboardTask[]) {
+  const grouped = tasks.reduce<Record<string, {
+    tecnico: string;
+    tareas: number;
+    completadas: number;
+    horasPlanificadas: number;
+    horasReales: number;
+    horasPausadas: number;
+    horasAtraso: number;
+  }>>((acc, task) => {
+    const tecnico = task.tecnico || 'Sin tecnico';
+    if (!acc[tecnico]) {
+      acc[tecnico] = {
+        tecnico,
+        tareas: 0,
+        completadas: 0,
+        horasPlanificadas: 0,
+        horasReales: 0,
+        horasPausadas: 0,
+        horasAtraso: 0,
+      };
+    }
+
+    acc[tecnico].tareas += 1;
+    acc[tecnico].completadas += task.estado === 'COMPLETADA' ? 1 : 0;
+    acc[tecnico].horasPlanificadas += Number(task.tiempo_estandar_horas || 0);
+    acc[tecnico].horasReales += taskRealHours(task);
+    acc[tecnico].horasPausadas += taskPausedHours(task);
+    acc[tecnico].horasAtraso += taskDelayHours(task);
+    return acc;
+  }, {});
+
+  return Object.values(grouped)
+    .map((item) => ({
+      ...item,
+      horasPlanificadas: roundOne(item.horasPlanificadas),
+      horasReales: roundOne(item.horasReales),
+      horasPausadas: roundOne(item.horasPausadas),
+      horasAtraso: roundOne(item.horasAtraso),
+      eficiencia: item.horasReales > 0 ? Math.round((item.horasPlanificadas / item.horasReales) * 100) : 0,
+    }))
+    .sort((a, b) => b.eficiencia - a.eficiencia || b.completadas - a.completadas);
+}
+
+function taskRealHours(task: DashboardTask) {
+  const timing = taskTiming(task);
+  if (timing.activeMs > 0) return timing.activeMs / 3600000;
+  if (task.fecha_inicio_real && task.fecha_fin_real) {
+    return Math.max(0, new Date(task.fecha_fin_real).getTime() - new Date(task.fecha_inicio_real).getTime()) / 3600000;
+  }
+  return 0;
+}
+
+function taskPausedHours(task: DashboardTask) {
+  return taskTiming(task).pausedMs / 3600000;
+}
+
+function taskTiming(task: DashboardTask) {
+  const events = (task.eventos ?? [])
+    .slice()
+    .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime());
+  let activeStart: number | null = null;
+  let pauseStart: number | null = null;
+  let activeMs = 0;
+  let pausedMs = 0;
+
+  for (const event of events) {
+    const time = new Date(event.fecha_hora).getTime();
+    if (!Number.isFinite(time)) continue;
+
+    if (event.accion === 'INICIAR' || event.accion === 'REANUDAR') {
+      if (pauseStart !== null) {
+        pausedMs += Math.max(0, time - pauseStart);
+        pauseStart = null;
+      }
+      activeStart = time;
+    }
+
+    if (event.accion === 'PAUSAR') {
+      if (activeStart !== null) {
+        activeMs += Math.max(0, time - activeStart);
+        activeStart = null;
+      }
+      pauseStart = time;
+    }
+
+    if (event.accion === 'FINALIZAR') {
+      if (activeStart !== null) {
+        activeMs += Math.max(0, time - activeStart);
+        activeStart = null;
+      }
+      if (pauseStart !== null) {
+        pausedMs += Math.max(0, time - pauseStart);
+        pauseStart = null;
+      }
+    }
+  }
+
+  if (activeStart !== null && task.estado === 'EN_PROCESO') activeMs += Math.max(0, Date.now() - activeStart);
+  if (pauseStart !== null && task.estado === 'PAUSADA') pausedMs += Math.max(0, Date.now() - pauseStart);
+
+  return { activeMs, pausedMs };
+}
+
+function taskDelayHours(task: DashboardTask) {
+  if (!task.fecha_fin_planificada) return 0;
+  const plannedEnd = new Date(task.fecha_fin_planificada).getTime();
+  if (!Number.isFinite(plannedEnd)) return 0;
+  const actualEnd = task.fecha_fin_real
+    ? new Date(task.fecha_fin_real).getTime()
+    : task.estado === 'COMPLETADA'
+      ? plannedEnd
+      : Date.now();
+
+  return Math.max(0, (actualEnd - plannedEnd) / 3600000);
+}
+
+function roundOne(value: number) {
+  return Math.round(value * 10) / 10;
 }

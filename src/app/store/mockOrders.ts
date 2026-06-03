@@ -183,7 +183,7 @@ function emitProcessesChange() {
 async function loadAllProcesses(): Promise<void> {
   const { data, error } = await supabase
     .from('orden_isla_tareas')
-    .select('id, orden_id, operacion_nombre, tecnico_nombre, tiempo_estandar_ajustado, tarifa_hora_aplicada, fecha_inicio_planificada, fecha_fin_planificada, estado, fecha_inicio_real, fecha_fin_real, motivo_ajuste, observaciones, islas!inner(nombre), orden_isla_tarea_eventos(accion, estado_resultante, fecha_hora, observacion)');
+    .select('id, orden_id, isla_id, tecnico_id, operacion_nombre, tecnico_nombre, tiempo_estandar_ajustado, tarifa_hora_aplicada, fecha_inicio_planificada, fecha_fin_planificada, estado, fecha_inicio_real, fecha_fin_real, motivo_ajuste, observaciones, islas!inner(nombre), orden_isla_tarea_eventos(accion, tecnico_id, estado_resultante, fecha_hora, observacion)');
 
   if (error) {
     processesCache = {};
@@ -193,13 +193,13 @@ async function loadAllProcesses(): Promise<void> {
   const map: ProcessesMap = {};
   for (const row of (data ?? [])) {
     const r = row as {
-      id: string; orden_id: string; operacion_nombre: string | null; tecnico_nombre: string | null;
+      id: string; orden_id: string; isla_id: string; tecnico_id: string | null; operacion_nombre: string | null; tecnico_nombre: string | null;
       tiempo_estandar_ajustado: number; tarifa_hora_aplicada: number;
       fecha_inicio_planificada: string; fecha_fin_planificada: string;
       estado: string; fecha_inicio_real: string | null; fecha_fin_real: string | null;
       motivo_ajuste: string | null; observaciones: string | null;
       islas: { nombre: string };
-      orden_isla_tarea_eventos: Array<{ accion: string; estado_resultante: string; fecha_hora: string; observacion: string | null }>;
+      orden_isla_tarea_eventos: Array<{ accion: string; tecnico_id: string | null; estado_resultante: string; fecha_hora: string; observacion: string | null }>;
     };
 
     if (!map[r.orden_id]) {
@@ -209,6 +209,8 @@ async function loadAllProcesses(): Promise<void> {
     map[r.orden_id].tareas.push({
       id: r.id,
       isla: r.islas?.nombre ?? '',
+      isla_id: r.isla_id,
+      tecnico_id: r.tecnico_id ?? undefined,
       operacion: r.operacion_nombre ?? '',
       tecnico: r.tecnico_nombre ?? '',
       tiempo_estandar_horas: Number(r.tiempo_estandar_ajustado),
@@ -221,6 +223,7 @@ async function loadAllProcesses(): Promise<void> {
       motivo_ajuste: r.motivo_ajuste ?? undefined,
       eventos: (r.orden_isla_tarea_eventos ?? []).map((e) => ({
         accion: e.accion as 'INICIAR' | 'PAUSAR' | 'REANUDAR' | 'FINALIZAR',
+        tecnico_id: e.tecnico_id ?? undefined,
         fecha_hora: e.fecha_hora,
         estado_resultante: e.estado_resultante as OrderProcess['tareas'][number]['estado'] & string,
         observacion: e.observacion ?? '',
@@ -294,6 +297,7 @@ export async function modifyMockIslandTask(
   orderId: string,
   taskId: string,
   changes: {
+    tecnico_id: string;
     tecnico: string;
     tiempo_estandar_horas: number;
     tarifa_hora: number;

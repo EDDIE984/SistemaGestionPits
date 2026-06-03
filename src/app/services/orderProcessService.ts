@@ -69,21 +69,39 @@ type PartData = OrderProcess['repuestos'][number];
 type PartRow = PartData & { created_at?: string };
 export type ProformaSection = 'piezas' | 'aprobacion' | 'repuestos';
 
-async function findExistingPieceDamage(orderId: string, pieceName: string) {
+async function linkPhotosToPieceDamage(orderId: string, piece: PieceDamageData) {
+  if (!piece.id || !piece.foto_key) return;
+
   const { data, error } = await supabase
-    .from('orden_piezas_danos')
-    .select('id, pieza, categoria_dano, observacion, requiere_reemplazo, costo_estimado, created_at')
-    .eq('orden_id', orderId)
-    .order('created_at', { ascending: false });
+    .from('adjuntos')
+    .select('id, descripcion')
+    .eq('tabla_referencia', 'ordenes')
+    .eq('referencia_id', orderId);
 
   if (error) throw error;
 
-  const normalizedPieceName = normalizeText(pieceName);
-  const matches = ((data ?? []) as PieceDamageRow[]).filter((row) => normalizeText(row.pieza) === normalizedPieceName);
-  return {
-    primary: matches[0] ?? null,
-    duplicates: matches.slice(1),
-  };
+  const updates = (data ?? [])
+    .map((row) => {
+      try {
+        const metadata = JSON.parse((row as { descripcion: string | null }).descripcion ?? '{}') as Record<string, unknown>;
+        if (metadata.etapa !== 'PROFORMA' || metadata.pieza_key !== piece.foto_key) return null;
+        return {
+          id: (row as { id: string }).id,
+          descripcion: JSON.stringify({
+            ...metadata,
+            pieza: piece.pieza,
+            pieza_dano_id: piece.id,
+          }),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((item): item is { id: string; descripcion: string } => Boolean(item));
+
+  await Promise.all(
+    updates.map((item) => supabase.from('adjuntos').update({ descripcion: item.descripcion }).eq('id', item.id)),
+  );
 }
 
 async function savePieceDamage(orderId: string, piece: PieceDamageData) {
@@ -97,26 +115,7 @@ async function savePieceDamage(orderId: string, piece: PieceDamageData) {
 
   if (piece.id) {
     await supabase.from('orden_piezas_danos').update(payload).eq('id', piece.id);
-    const existing = await findExistingPieceDamage(orderId, piece.pieza);
-    const duplicateIds = [existing.primary, ...existing.duplicates]
-      .filter((row): row is PieceDamageRow => Boolean(row) && row.id !== piece.id)
-      .map((row) => row.id);
-    if (duplicateIds.length > 0) {
-      await supabase.from('orden_piezas_danos').delete().in('id', duplicateIds);
-    }
-    return;
-  }
-
-  const existing = await findExistingPieceDamage(orderId, piece.pieza);
-
-  if (existing.primary) {
-    await supabase.from('orden_piezas_danos').update(payload).eq('id', existing.primary.id);
-    piece.id = existing.primary.id;
-
-    const duplicateIds = existing.duplicates.map((row) => row.id);
-    if (duplicateIds.length > 0) {
-      await supabase.from('orden_piezas_danos').delete().in('id', duplicateIds);
-    }
+    await linkPhotosToPieceDamage(orderId, piece);
     return;
   }
 
@@ -126,16 +125,7 @@ async function savePieceDamage(orderId: string, piece: PieceDamageData) {
   }).select('id').single();
 
   if (data) piece.id = (data as { id: string }).id;
-}
-
-function uniquePieceDamageRows(rows: PieceDamageRow[]) {
-  const byPiece = new Map<string, PieceDamageRow>();
-
-  for (const row of rows) {
-    byPiece.set(normalizeText(row.pieza), row);
-  }
-
-  return Array.from(byPiece.values());
+  await linkPhotosToPieceDamage(orderId, piece);
 }
 
 async function findExistingApprovalRows(orderId: string, estado?: string) {
@@ -331,7 +321,7 @@ export async function fetchOrderProcess(orderId: string): Promise<OrderProcess> 
   };
 
   return {
-    proforma: uniquePieceDamageRows((proformaResult.data ?? []) as PieceDamageRow[]).map((p) => ({
+    proforma: ((proformaResult.data ?? []) as PieceDamageRow[]).map((p) => ({
       id: p.id,
       pieza: p.pieza,
       categoria_dano: p.categoria_dano,

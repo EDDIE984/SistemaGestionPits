@@ -16,6 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/ta
 import { Textarea } from '@/app/components/ui/textarea';
 import { orderFlow } from '@/app/data/mockData';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
+import { fetchIslas } from '@/app/services/configService';
+import type { IslaOption } from '@/app/services/configService';
 import { deleteOrderPhoto, fetchOrderPhotos, uploadOrderPhotos } from '@/app/services/orderPhotosService';
 import {
   deleteMockOrder,
@@ -40,6 +42,7 @@ const initialForms: Record<OrderStatus, StepForm> = {
     requiere_reemplazo: false,
     costo_estimado: '',
     foto_url_pieza: '',
+    pieza_key: '',
     estado_aprobacion: 'PENDIENTE_ENVIO',
     fecha_envio: '',
     fecha_aprobacion: '',
@@ -140,12 +143,40 @@ export function OrderDetailPage() {
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
   const [photoError, setPhotoError] = useState('');
   const [selectedPhoto, setSelectedPhoto] = useState<OrderPhotoAttachment | null>(null);
+  const [planningIslas, setPlanningIslas] = useState<IslaOption[]>([]);
 
   useEffect(() => {
     if (order && process) {
       setForm(formFromProcess(order.estado, process, order.tipo_cliente));
     }
   }, [order?.id, order?.estado, process]);
+
+  useEffect(() => {
+    if (order?.estado !== 'LEVANTAMIENTO_PROFORMA' || activeProformaTab !== 'piezas') return;
+    if (form.pieza_key) return;
+    setForm((current) => ({ ...current, pieza_key: newPiecePhotoKey() }));
+  }, [activeProformaTab, form.pieza_key, order?.estado]);
+
+  useEffect(() => {
+    if (!order?.sucursal_id) {
+      setPlanningIslas([]);
+      return;
+    }
+
+    fetchIslas(order.sucursal_id)
+      .then(setPlanningIslas)
+      .catch(() => setPlanningIslas([]));
+  }, [order?.sucursal_id]);
+
+  useEffect(() => {
+    if (order?.estado !== 'PLANIFICACION_REPARACION' || planningIslas.length === 0) return;
+
+    setForm((current) => {
+      const currentIsla = String(current.isla || '');
+      const exists = planningIslas.some((isla) => isla.nombre === currentIsla);
+      return exists ? current : { ...current, isla: planningIslas[0].nombre };
+    });
+  }, [order?.estado, planningIslas]);
 
   useEffect(() => {
     if (location.hash !== '#flujograma') return;
@@ -218,6 +249,7 @@ export function OrderDetailPage() {
     }
 
     try {
+      const currentPieceKey = String(form.pieza_key || '');
       const nextProcess = withHistoryEntry(
         applyStepData(process, order.estado, form),
         order.estado,
@@ -226,6 +258,18 @@ export function OrderDetailPage() {
       );
       await saveMockOrderProcess(order.id, nextProcess, order.estado, order.estado === 'LEVANTAMIENTO_PROFORMA' ? activeProformaTab : undefined);
       showSavedNotice('Datos guardados.');
+      if (order.estado === 'LEVANTAMIENTO_PROFORMA' && activeProformaTab === 'piezas') {
+        const savedPiece = nextProcess.proforma.find((piece) => piece.foto_key === currentPieceKey) ?? nextProcess.proforma.at(-1);
+        if (savedPiece?.id && currentPieceKey) {
+          setPhotos((current) => current.map((photo) => (
+            photo.pieza_key === currentPieceKey
+              ? { ...photo, pieza: savedPiece.pieza, pieza_dano_id: savedPiece.id }
+              : photo
+          )));
+        }
+        setActiveProformaTab('piezas');
+        setForm((current) => clearPieceDamageFields(current));
+      }
       return nextProcess;
     } catch (error) {
       showSavedNotice(error instanceof Error ? error.message : 'No se pudo guardar el registro.');
@@ -268,7 +312,7 @@ export function OrderDetailPage() {
     navigate('/ordenes');
   };
 
-  const handlePhotosUpload = async (files: File[], etapa: OrderPhotoAttachment['etapa'], context?: { pieza?: string }) => {
+  const handlePhotosUpload = async (files: File[], etapa: OrderPhotoAttachment['etapa'], context?: { pieza?: string; pieza_key?: string; pieza_dano_id?: string }) => {
     if (!order || files.length === 0) return;
 
     setIsUploadingPhotos(true);
@@ -383,6 +427,7 @@ export function OrderDetailPage() {
                   onPhotoDelete={handlePhotoDelete}
                   activeProformaTab={activeProformaTab}
                   onProformaTabChange={setActiveProformaTab}
+                  planningIslas={planningIslas}
                 />
 
                 {isIslandControlledStatus(order.estado) ? null : (
@@ -445,7 +490,19 @@ export function OrderDetailPage() {
             photos={photos}
             isLoading={isPhotosLoading}
             error={photoError}
-            pieces={[...process.proforma.map((piece) => piece.pieza), String(form.pieza || '')]}
+            pieces={[
+              ...process.proforma.map((piece, index) => ({
+                id: piece.id,
+                key: piece.foto_key,
+                name: piece.pieza,
+                label: pieceLabel(piece.pieza, index),
+              })),
+              {
+                key: String(form.pieza_key || ''),
+                name: String(form.pieza || ''),
+                label: String(form.pieza || '').trim() ? `En captura: ${String(form.pieza)}` : 'Pieza en captura',
+              },
+            ]}
             onSelect={setSelectedPhoto}
             onDelete={handlePhotoDelete}
           />
@@ -524,7 +581,7 @@ function proformaFlowMessage(progress: ReturnType<typeof proformaProgress>) {
   }
 
   if (!progress.approvalClosed) {
-    return 'Piezas y Daños ya está cerrado. Completa la aprobación para habilitar Repuestos.';
+    return 'Puedes seguir registrando Piezas y Daños. Cuando termines, pasa a Aprobación.';
   }
 
   if (progress.approvalRejected) {
@@ -541,7 +598,7 @@ function proformaFlowMessage(progress: ReturnType<typeof proformaProgress>) {
 function isProformaTabEnabled(process: MockOrderProcess, tab: 'piezas' | 'aprobacion' | 'repuestos') {
   const progress = proformaProgress(process);
 
-  if (tab === 'piezas') return !progress.hasPieces && !progress.hasApproval && !progress.hasParts;
+  if (tab === 'piezas') return !progress.hasApproval && !progress.hasParts;
   if (tab === 'aprobacion') return progress.hasPieces && !progress.approvalClosed && !progress.hasParts;
   return progress.approvalApproved && !progress.partsReceived;
 }
@@ -573,7 +630,7 @@ function canSaveProformaSection(
 
 function proformaSaveBlockedMessage(process: MockOrderProcess, tab: 'piezas' | 'aprobacion' | 'repuestos') {
   if (!isProformaTabEnabled(process, tab)) {
-    if (tab === 'piezas') return 'Piezas y Daños ya fue registrado. Continúa con Aprobación.';
+    if (tab === 'piezas') return 'Piezas y Daños ya está cerrado porque el flujo avanzó a Aprobación o Repuestos.';
     if (tab === 'aprobacion') return 'Aprobación no está habilitada o ya fue completada. Continúa con Repuestos.';
     return 'Repuestos no está habilitado o ya fue completado.';
   }
@@ -596,17 +653,10 @@ function nextBlockedLabel(status: OrderStatus, form: StepForm, process: MockOrde
 
 function formFromProcess(status: OrderStatus, process: MockOrderProcess, tipo_cliente: 'PARTICULAR' | 'ASEGURADORA'): StepForm {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
-    const lastPieza = process.proforma.at(-1);
     const lastRepuesto = process.repuestos.at(-1);
     return {
       ...initialForms.LEVANTAMIENTO_PROFORMA,
       tipo_cliente,
-      pieza: lastPieza?.pieza ?? '',
-      categoria_dano: lastPieza?.categoria_dano ?? 'K3',
-      observacion_pieza: lastPieza?.observacion ?? '',
-      requiere_reemplazo: lastPieza?.requiere_reemplazo ?? false,
-      costo_estimado: String(lastPieza?.costo_estimado ?? ''),
-      foto_url_pieza: lastPieza?.foto_url ?? '',
       estado_aprobacion: ['NO_APLICA', '', undefined].includes(process.aseguradora.estado)
         ? 'PENDIENTE_ENVIO'
         : process.aseguradora.estado,
@@ -682,6 +732,7 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
       requiere_reemplazo: Boolean(form.requiere_reemplazo),
       costo_estimado: Number(form.costo_estimado || 0),
       foto_url: String(form.foto_url_pieza || ''),
+      foto_key: String(form.pieza_key || ''),
     };
 
     const updatedAseguradora = {
@@ -695,14 +746,16 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
     };
 
     const descripcion = String(form.descripcion_repuesto || '').trim();
+    const estadoRepuesto = String(form.estado_repuesto || 'PENDIENTE');
     const hasRepuestoData = descripcion
+      || estadoRepuesto === 'RECIBIDO'
       || String(form.proveedor || '').trim()
       || String(form.fecha_estimada_llegada || '').trim()
       || Number(form.costo_repuesto || 0) > 0;
     const updatedRepuesto = {
       descripcion: descripcion || 'Repuesto por definir',
       cantidad: Number(form.cantidad_repuesto || 1),
-      estado: String(form.estado_repuesto || 'PENDIENTE'),
+      estado: estadoRepuesto,
       proveedor: String(form.proveedor || ''),
       fecha_estimada_llegada: String(form.fecha_estimada_llegada || ''),
       fecha_real_llegada: String(form.fecha_real_llegada || ''),
@@ -712,7 +765,7 @@ function applyStepData(process: MockOrderProcess, status: OrderStatus, form: Ste
 
     return {
       ...process,
-      proforma: pieza ? upsertLast(process.proforma, updatedPieza) : process.proforma,
+      proforma: pieza ? appendItem(process.proforma, updatedPieza) : process.proforma,
       aseguradora: updatedAseguradora,
       repuestos: hasRepuestoData ? upsertLast(process.repuestos, updatedRepuesto) : process.repuestos,
     };
@@ -775,6 +828,23 @@ function upsertLast<T>(items: T[], nextItem: T) {
 
 function appendItem<T>(items: T[], nextItem: T) {
   return [...items, nextItem];
+}
+
+function clearPieceDamageFields(form: StepForm): StepForm {
+  return {
+    ...form,
+    pieza: '',
+    categoria_dano: 'K3',
+    observacion_pieza: '',
+    requiere_reemplazo: false,
+    costo_estimado: '',
+    foto_url_pieza: '',
+    pieza_key: newPiecePhotoKey(),
+  };
+}
+
+function newPiecePhotoKey() {
+  return `pieza-${Date.now()}-${crypto.randomUUID()}`;
 }
 
 function withHistoryEntry(
@@ -916,11 +986,12 @@ interface StepFieldsProps {
   process: MockOrderProcess;
   photos: OrderPhotoAttachment[];
   isUploadingPhotos: boolean;
-  onPhotosUpload: (files: File[], etapa: OrderPhotoAttachment['etapa'], context?: { pieza?: string }) => void;
+  onPhotosUpload: (files: File[], etapa: OrderPhotoAttachment['etapa'], context?: { pieza?: string; pieza_key?: string; pieza_dano_id?: string }) => void;
   onPhotoSelect: (photo: OrderPhotoAttachment) => void;
   onPhotoDelete: (photo: OrderPhotoAttachment) => void;
   activeProformaTab: 'piezas' | 'aprobacion' | 'repuestos';
   onProformaTabChange: (tab: 'piezas' | 'aprobacion' | 'repuestos') => void;
+  planningIslas: IslaOption[];
 }
 
 function StepFields({
@@ -935,6 +1006,7 @@ function StepFields({
   onPhotoDelete,
   activeProformaTab,
   onProformaTabChange,
+  planningIslas,
 }: StepFieldsProps) {
   if (status === 'LEVANTAMIENTO_PROFORMA') {
     const hasProformaRecords = process.proforma.length > 0 || process.aseguradora.id || process.repuestos.length > 0;
@@ -1023,9 +1095,12 @@ function StepFields({
             <PhotoUploadPanel
               etapa="PROFORMA"
               title="Fotos de proforma"
-              photos={photos.filter((photo) => photo.etapa === 'PROFORMA')}
+              photos={photos.filter((photo) => photo.etapa === 'PROFORMA' && photo.pieza_key === form.pieza_key)}
               isUploading={isUploadingPhotos}
-              onUpload={(files) => onPhotosUpload(files, 'PROFORMA', { pieza: String(form.pieza || '').trim() })}
+              onUpload={(files) => onPhotosUpload(files, 'PROFORMA', {
+                pieza: String(form.pieza || '').trim(),
+                pieza_key: String(form.pieza_key || ''),
+              })}
               onSelect={onPhotoSelect}
               onDelete={onPhotoDelete}
             />
@@ -1038,7 +1113,7 @@ function StepFields({
                 <div className="space-y-1">
                   {process.proforma.map((p, i) => (
                     <div key={i} className="flex items-center justify-between rounded bg-white px-3 py-2 text-sm">
-                      <span className="font-medium text-gray-900">{p.pieza}</span>
+                      <span className="font-medium text-gray-900">{pieceLabel(p.pieza, i)}</span>
                       <span className="text-gray-500">{p.categoria_dano} · ${p.costo_estimado}</span>
                     </div>
                   ))}
@@ -1120,10 +1195,16 @@ function StepFields({
 
   if (status === 'PLANIFICACION_REPARACION') {
     const costo = Number(form.tiempo_estandar_horas || 0) * Number(form.tarifa_hora || 0);
+    const islandOptions = planningIslas.map((isla) => ({ value: isla.nombre, label: isla.nombre }));
     return (
       <div className="space-y-4">
+        {planningIslas.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            No hay islas activas configuradas para esta sucursal. Configura islas antes de planificar tareas.
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <SelectField label="Isla" value={String(form.isla)} onChange={(value) => onChange('isla', value)} options={['Enderezada', 'Pintura', 'Mecanica', 'Calidad']} />
+          <SelectField label="Isla" value={String(form.isla)} onChange={(value) => onChange('isla', value)} options={islandOptions} disabled={planningIslas.length === 0} />
           <Field label="Operacion" value={String(form.operacion)} onChange={(value) => onChange('operacion', value)} placeholder="Enderezada de panel lateral" />
           <Field label="Tecnico" value={String(form.tecnico)} onChange={(value) => onChange('tecnico', value)} placeholder="Carlos Enderezada" />
           <Field label="Tiempo estandar horas" type="number" value={String(form.tiempo_estandar_horas)} onChange={(value) => onChange('tiempo_estandar_horas', value)} />
@@ -1259,17 +1340,19 @@ function SelectField({
   value,
   onChange,
   options,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<string | { value: string; label: string }>;
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger disabled={disabled}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -1630,7 +1713,7 @@ function PhotoGalleryCard({
   photos: OrderPhotoAttachment[];
   isLoading: boolean;
   error: string;
-  pieces: string[];
+  pieces: PhotoPieceGroup[];
   onSelect: (photo: OrderPhotoAttachment) => void;
   onDelete: (photo: OrderPhotoAttachment) => void;
 }) {
@@ -1682,16 +1765,29 @@ function PhotoGalleryCard({
   );
 }
 
-function photoGalleryGroups(photos: OrderPhotoAttachment[], pieces: string[]) {
+type PhotoPieceGroup = {
+  id?: string;
+  key?: string;
+  name: string;
+  label: string;
+};
+
+function photoGalleryGroups(photos: OrderPhotoAttachment[], pieces: PhotoPieceGroup[]) {
   const proformaPhotos = photos.filter((photo) => photo.etapa === 'PROFORMA');
-  const normalizedPieces = pieces.map((piece) => piece.trim()).filter(Boolean);
   const groups: Array<{ title: string; photos: OrderPhotoAttachment[] }> = [];
   const usedPhotoIds = new Set<string>();
 
-  for (const piece of normalizedPieces) {
-    const piecePhotos = proformaPhotos.filter((photo) => normalizePhotoPiece(photo.pieza) === normalizePhotoPiece(piece));
+  for (const piece of pieces) {
+    const piecePhotos = proformaPhotos.filter((photo) => {
+      if (piece.id && photo.pieza_dano_id === piece.id) return true;
+      if (piece.key && photo.pieza_key === piece.key) return true;
+      if (!photo.pieza_dano_id && !photo.pieza_key && piece.name) {
+        return normalizePhotoPiece(photo.pieza) === normalizePhotoPiece(piece.name);
+      }
+      return false;
+    });
     if (piecePhotos.length > 0) {
-      groups.push({ title: piece, photos: piecePhotos });
+      groups.push({ title: piece.label, photos: piecePhotos });
       piecePhotos.forEach((photo) => usedPhotoIds.add(photo.id));
     }
   }
@@ -1709,6 +1805,10 @@ function photoGalleryGroups(photos: OrderPhotoAttachment[], pieces: string[]) {
   }
 
   return groups;
+}
+
+function pieceLabel(piece: string, index: number) {
+  return `${piece || 'Pieza sin nombre'} #${index + 1}`;
 }
 
 function normalizePhotoPiece(value?: string) {

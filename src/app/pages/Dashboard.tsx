@@ -3,18 +3,25 @@ import { Link } from 'react-router';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { KpiCard } from '@/app/components/KpiCard';
 import { PageHeader } from '@/app/components/PageHeader';
+import { SucursalScopeControl } from '@/app/components/SucursalScopeControl';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Progress } from '@/app/components/ui/progress';
+import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime, formatMoney, orderStatusLabel } from '@/app/lib/format';
 import { useMockOrders, useMockOrderProcesses } from '@/app/store/mockOrders';
 
 export function Dashboard() {
   const orders = useMockOrders();
   const processes = useMockOrderProcesses();
-  const activeOrders = orders.filter((order) => order.estado !== 'ENTREGADO');
-  const allTasks = Object.values(processes).flatMap((p) => p.tareas ?? []);
+  const sucursalScope = useSucursalScope();
+  const scopedOrders = orders.filter((order) => matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId));
+  const scopedOrderIds = new Set(scopedOrders.map((order) => order.id));
+  const activeOrders = scopedOrders.filter((order) => order.estado !== 'ENTREGADO');
+  const allTasks = Object.entries(processes)
+    .filter(([orderId]) => scopedOrderIds.has(orderId))
+    .flatMap(([, process]) => process.tareas ?? []);
   const now = Date.now();
   const delayedTasks = allTasks.filter((task) => {
     if (!task.fecha_fin_planificada || task.estado === 'COMPLETADA') return false;
@@ -48,6 +55,17 @@ export function Dashboard() {
         icon={Gauge}
         title="Dashboard de taller"
         description="Vista ejecutiva de ordenes, carga por isla, atrasos y eficiencia inicial del proceso operativo."
+        action={(
+          <div className="w-full min-w-64 lg:w-72">
+            <SucursalScopeControl
+              isAdmin={sucursalScope.isAdmin}
+              sucursales={sucursalScope.sucursales}
+              selectedSucursalId={sucursalScope.selectedSucursalId}
+              selectedSucursalName={sucursalScope.selectedSucursalName}
+              onSucursalChange={sucursalScope.setSelectedSucursalId}
+            />
+          </div>
+        )}
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -132,7 +150,7 @@ export function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {orders.map((order) => (
+                {scopedOrders.map((order) => (
                   <tr key={order.id}>
                     <td className="py-4 text-sm font-medium text-gray-900">{order.numero_orden}</td>
                     <td className="text-sm text-gray-700">{order.placa} · {order.marca} {order.modelo}</td>

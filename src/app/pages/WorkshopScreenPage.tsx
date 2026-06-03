@@ -6,12 +6,13 @@ import { StatusBadge } from '@/app/components/StatusBadge';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
-import { matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
+import { ALL_SUCURSALES, matchesSucursalScope, useSucursalScope } from '@/app/hooks/useSucursalScope';
 import { formatDateTime, signalLabel } from '@/app/lib/format';
+import { fetchAllIslas, fetchIslas } from '@/app/services/configService';
+import type { IslaOption } from '@/app/services/configService';
 import { refreshOrders, refreshProcesses, useMockOrderProcesses, useMockOrders } from '@/app/store/mockOrders';
 
 const ALL_ISLANDS = '__all__';
-const islands = ['Enderezada', 'Pintura', 'Mecanica', 'Calidad'];
 const WORKSHOP_REFRESH_MS = 30 * 60 * 1000;
 
 export function WorkshopScreenPage() {
@@ -20,6 +21,7 @@ export function WorkshopScreenPage() {
   const sucursalScope = useSucursalScope();
   const [selectedIsland, setSelectedIsland] = useState(ALL_ISLANDS);
   const [lastRefreshAt, setLastRefreshAt] = useState(() => new Date());
+  const [islas, setIslas] = useState<IslaOption[]>([]);
 
   const refreshWorkshopScreen = () => {
     refreshOrders();
@@ -31,6 +33,26 @@ export function WorkshopScreenPage() {
     const intervalId = window.setInterval(refreshWorkshopScreen, WORKSHOP_REFRESH_MS);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    setSelectedIsland(ALL_ISLANDS);
+
+    if (sucursalScope.effectiveSucursalId === ALL_SUCURSALES) {
+      fetchAllIslas()
+        .then(setIslas)
+        .catch(() => setIslas([]));
+      return;
+    }
+
+    if (!sucursalScope.effectiveSucursalId) {
+      setIslas([]);
+      return;
+    }
+
+    fetchIslas(sucursalScope.effectiveSucursalId)
+      .then(setIslas)
+      .catch(() => setIslas([]));
+  }, [sucursalScope.effectiveSucursalId]);
 
   const tasks = useMemo(() => orders
     .filter((order) => (order.estado === 'INICIO_REPARACION' || order.estado === 'EN_PROCESO_ISLAS') && matchesSucursalScope(order.sucursal_id, sucursalScope.effectiveSucursalId))
@@ -49,9 +71,10 @@ export function WorkshopScreenPage() {
 
   const islandsWithTasks = useMemo(() => {
     const names = new Set(tasks.filter((task) => task.estado !== 'COMPLETADA').map((task) => task.isla).filter(Boolean));
-    return islands.filter((isla) => names.has(isla));
-  }, [tasks]);
-  const visibleIslands = selectedIsland === ALL_ISLANDS ? islandsWithTasks : islandsWithTasks.filter((isla) => isla === selectedIsland);
+    return Array.from(new Set(islas.map((isla) => isla.nombre))).filter((isla) => names.has(isla));
+  }, [islas, tasks]);
+  const selectedIslandName = islas.find((isla) => isla.id === selectedIsland)?.nombre;
+  const visibleIslands = selectedIsland === ALL_ISLANDS ? islandsWithTasks : islandsWithTasks.filter((isla) => isla === selectedIslandName);
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -84,8 +107,8 @@ export function WorkshopScreenPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_ISLANDS}>Todas las islas</SelectItem>
-                {islands.map((isla) => (
-                  <SelectItem key={isla} value={isla}>{isla}</SelectItem>
+                {islas.map((isla) => (
+                  <SelectItem key={isla.id} value={isla.id}>{isla.nombre}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

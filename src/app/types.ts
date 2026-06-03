@@ -95,6 +95,7 @@ export interface CatalogItem {
 export interface OrderProcess {
   proforma: Array<{
     id?: string;
+    foto_key?: string;
     pieza: string;
     categoria_dano: string;
     observacion: string;
@@ -180,5 +181,7 @@ export interface OrderPhotoAttachment {
   etapa: 'PROFORMA' | 'CALIDAD' | 'ENTREGA' | 'GENERAL';
   nombre: string;
   pieza?: string;
+  pieza_key?: string;
+  pieza_dano_id?: string;
   created_at: string;
 }

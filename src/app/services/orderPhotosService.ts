@@ -23,7 +23,7 @@ function safeFileName(fileName: string) {
 }
 
 function parseDescription(description?: string | null) {
-  if (!description) return { etapa: 'GENERAL', nombre: 'Foto de orden', storage_path: '', pieza: '' };
+  if (!description) return { etapa: 'GENERAL', nombre: 'Foto de orden', storage_path: '', pieza: '', pieza_key: '', pieza_dano_id: '' };
 
   try {
     const parsed = JSON.parse(description) as Partial<OrderPhotoAttachment>;
@@ -32,9 +32,11 @@ function parseDescription(description?: string | null) {
       nombre: parsed.nombre ?? 'Foto de orden',
       storage_path: parsed.storage_path ?? '',
       pieza: parsed.pieza ?? '',
+      pieza_key: parsed.pieza_key ?? '',
+      pieza_dano_id: parsed.pieza_dano_id ?? '',
     };
   } catch {
-    return { etapa: 'GENERAL', nombre: description, storage_path: '', pieza: '' };
+    return { etapa: 'GENERAL', nombre: description, storage_path: '', pieza: '', pieza_key: '', pieza_dano_id: '' };
   }
 }
 
@@ -64,6 +66,8 @@ export async function fetchOrderPhotos(orderId: string): Promise<OrderPhotoAttac
       etapa: metadata.etapa as OrderPhotoAttachment['etapa'],
       nombre: metadata.nombre,
       pieza: metadata.pieza,
+      pieza_key: metadata.pieza_key,
+      pieza_dano_id: metadata.pieza_dano_id,
       created_at: item.created_at,
     };
   });
@@ -73,7 +77,7 @@ export async function uploadOrderPhotos(
   orderId: string,
   files: File[],
   etapa: OrderPhotoAttachment['etapa'],
-  context?: { pieza?: string },
+  context?: { pieza?: string; pieza_key?: string; pieza_dano_id?: string },
 ): Promise<OrderPhotoAttachment[]> {
   const session = getSession();
   if (!session) throw new Error('Sesion no encontrada');
@@ -97,6 +101,8 @@ export async function uploadOrderPhotos(
       nombre: file.name,
       storage_path: storagePath,
       pieza: context?.pieza?.trim() || undefined,
+      pieza_key: context?.pieza_key?.trim() || undefined,
+      pieza_dano_id: context?.pieza_dano_id?.trim() || undefined,
     };
 
     const { data, error } = await supabase
@@ -123,6 +129,8 @@ export async function uploadOrderPhotos(
       etapa,
       nombre: file.name,
       pieza: metadata.pieza,
+      pieza_key: metadata.pieza_key,
+      pieza_dano_id: metadata.pieza_dano_id,
       created_at: (data as { created_at: string }).created_at,
     });
   }

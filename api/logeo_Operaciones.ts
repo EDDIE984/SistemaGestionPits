@@ -1,5 +1,3 @@
-import { createSupabaseAdmin, handleOptions, parseBody, sendJson } from './_supabase';
-
 interface LoginRequest {
   username?: string;
   usuario?: string;
@@ -21,6 +19,49 @@ interface LoginRow {
 interface TecnicoRow {
   id: string;
   isla_principal_id: string | null;
+}
+
+function sendJson(response: any, status: number, body: unknown) {
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  response.status(status).json(body);
+}
+
+function handleOptions(request: any, response: any) {
+  if (request.method !== 'OPTIONS') return false;
+  sendJson(response, 200, { ok: true });
+  return true;
+}
+
+function parseBody<T>(body: unknown): T {
+  if (typeof body === 'string') {
+    if (!body.trim()) return {} as T;
+    return JSON.parse(body) as T;
+  }
+  return body as T;
+}
+
+async function createSupabaseAdmin() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl) {
+    throw new Error('Falta configurar SUPABASE_URL o VITE_SUPABASE_URL');
+  }
+
+  if (!serviceRoleKey) {
+    throw new Error('Falta configurar SUPABASE_SERVICE_ROLE_KEY');
+  }
+
+  const { createClient } = await import('@supabase/supabase-js');
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
 }
 
 export default async function handler(request: any, response: any) {
